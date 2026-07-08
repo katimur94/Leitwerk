@@ -1,0 +1,15 @@
+node_modules/
+dist/
+dev-dist/
+.turbo/
+*.local
+.env
+.env.*
+!.env.example
+supabase/.temp/
+supabase/.branches/
+coverage/
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+.claude/settings.local.json
