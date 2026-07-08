@@ -39,8 +39,14 @@ pnpm --filter @leitwerk/pwa dev
 node apps/runner/dist/index.js init --url http://127.0.0.1:54321/functions/v1
 LEITWERK_CLAUDE_BIN=tools/mock-server/claude-mock.cjs \
 LEITWERK_GMAIL_API_URL=http://127.0.0.1:54321/gmail/v1/users/me \
+LEITWERK_WHISPER_BIN=tools/mock-server/whisper-mock.cjs \
 node apps/runner/dist/index.js start
 ```
+`LEITWERK_WHISPER_BIN` zeigt auf einen deterministischen Whisper-Mock (Etappe 4) —
+Meetings/Sprachnotizen werden lokal „transkribiert“. Embeddings laufen ohne
+`LEITWERK_EMBED_BIN` über einen reproduzierbaren Hash-Fallback (grobe Ähnlichkeit,
+offline). In Produktion je ein echtes lokales Modell konfigurieren (siehe
+`tutorials/05_runner_installation.md (Abschnitt 6)`).
 `LEITWERK_GMAIL_API_URL` zeigt auf die Mini-Gmail-API des Mocks (Etappe 1) —
 „Gmail verbinden“ legt dann ein **Demo-Postfach** mit fünf Beispiel-Mails an.
 
@@ -378,9 +384,73 @@ Freigabe — der Entwurf geht dann durch denselben geplanten Versand wie jede Ma
 (30-Sekunden-Rückholen inklusive, Regel 4). **(3)** Überspringen ist immer eine Option
 und wird protokolliert.
 
-## 34 · Regel-Builder (Einstellungen → Regeln)
+## 34 · Autonomie-Regler mit Hochstufen-Gate (Etappe 4)
 
-![Regel-Builder](img/34-regel-builder.png)
+![Autonomie-Regler](img/34-automationen-regler.png)
+
+**(1)** Jede Automation hat einen Autonomie-Regler (1–4): 1 = KI schlägt vor · 2 = KI
+bereitet vor, du gibst frei · 3 = KI führt aus, Halte-Zone zum Stoppen · 4 = autonom.
+**(2)** Das **Hochstufen auf Stufe 3/4 prüft der Server** (RPC `set_autonomy_level`):
+erst ab der konfigurierten Trefferquote (`promote_threshold`) über genügend Läufe
+(`promote_min_runs`). Der Client darf `autonomy_level` gar nicht mehr direkt schreiben
+(Spalten-Grant). **(3)** Solange eine Automation die Quote nicht erreicht, erklärt ein
+Hinweis, warum die Hochstufung (noch) abgelehnt wird — hier am Beispiel der
+Mail-Klassifikation ohne Historie.
+
+## 35 · Halte-Zone (Stufe 3)
+
+![Halte-Zone](img/35-halte-zone.png)
+
+**(1)** Eine bewährte Stufe-3-Automation hat eine Auto-Antwort vorbereitet — sie liegt
+in der **Halte-Zone** mit sichtbarem Countdown (violett = KI, Regel 4). Der geplante
+Versand läuft über denselben `send-mail`-Mechanismus wie das 30-Sekunden-Rückholen.
+**(2)** Ein Klick stoppt vor dem Versand (`stop_automation_run`): der Entwurf geht zurück
+in den Entwurfsstatus, und der Stopp zählt als Korrektur in die Trefferquote (Regel 5).
+Der Cron `process_holding_runs` schließt abgelaufene Halte-Zonen ab.
+
+## 36 · Notizen & Sprachnotizen
+
+![Notizen](img/36-notizen.png)
+
+**(1)** Das Gedächtnis der Firma (MASTERPLAN §4 G): Markdown-Notizen an Vorgang/Kontakt
+oder frei. **(2)** Sprachnotizen nimmt die PWA über den Browser auf; die Datei landet
+im Bucket `audio`, ein `transcribe_note`-Job transkribiert sie **lokal** im Runner
+(Whisper — kein Cloud-Dienst). Kein Feature ohne Empty-State (Regel 9).
+
+## 37 · Institutionelles Wissen (Review)
+
+![Wissen](img/37-wissen.png)
+
+**(1)** Der Skill `knowledge_distill` (wöchentlicher Cron) destilliert dauerhafte Fakten
+aus Mails und Meetings — „Stadt X verlangt immer Formular Y“ — mit Quelle, Kategorie und
+Konfidenz (violettes Badge). **(2)** Nichts landet ungeprüft im Gedächtnis: Vorschläge
+werden **bestätigt** (→ `confirmed`) oder **abgelehnt** (→ kein Wiedervorschlag). Dubletten
+filtert die Anwendung.
+
+## 38 · Meetings: Audio → Protokoll
+
+![Meetings](img/38-meetings.png)
+
+**(1)** Audio hochladen (oder aufnehmen) → `transcribe_meeting` transkribiert **lokal**
+mit whisper.cpp (die Aufnahme verlässt die Organisation nie) → `summarize_meeting`
+erzeugt ein **KI-Protokoll** mit Entscheidungen, offenen Fragen und Aufgaben
+(`source='meeting'`, landen direkt im Aufgabenmodul). **(2)** Das Protokoll hängt am
+verknüpften Vorgang in der Timeline.
+
+## 39 · Kombinierte Suche (Volltext + semantisch)
+
+![Suche](img/39-suche.png)
+
+**(1)** Ein Feld (Strg/Cmd+K) über Mails, Vorgänge, Kontakte, Dokumente, Notizen und
+Wissen. Volltext (`tsvector`, german) erscheint sofort. **(2)** „Semantisch suchen“
+startet einen interaktiven `semantic_search`-Job — das Query-Embedding rechnet der
+**Runner lokal** (Embedder-Adapter, 1024-dim; ohne Modell ein deterministischer
+Hash-Fallback), nie der Client. Die eigentliche Vektor-Ähnlichkeit macht die DB
+(`search_combined` + `pgvector`); semantische Treffer tragen ein violettes Badge.
+
+## 40 · Regel-Builder (Einstellungen → Regeln)
+
+![Regel-Builder](img/40-regel-builder.png)
 
 Die Regel-Engine light (Etappe 0.5): **(1)** Jede Regel folgt dem Muster „Wenn
 *Ereignis* und *Bedingungen*, dann *Aktion*“. **(2)** Ereignisse wie `mail_received`,
@@ -389,17 +459,17 @@ Modulen ausgelöst. **(3)** Bedingungen prüfen Felder der Entity (UND-verknüpf
 von „ist gleich“ bis „fehlt“). **(4)** Ausgewertet wird serverseitig durch die
 Postgres-Funktion `evaluate_org_rules` — Aktionen: Benachrichtigung, Aufgabe oder KI-Job.
 
-## 35 · Regel aktiv
+## 41 · Regel aktiv
 
-![Regel-Liste](img/35-regel-liste.png)
+![Regel-Liste](img/41-regel-liste.png)
 
 **(1)** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede Ausführung
 landet im Audit-Log (`rule.executed`). Seit Etappe 1 feuern `mail_received` und
 `mail_sent` bei jeder synchronisierten bzw. gesendeten Nachricht durch die Engine.
 
-## 36 · Dark Mode
+## 42 · Dark Mode
 
-![Dark Mode](img/36-dark-mode.png)
+![Dark Mode](img/42-dark-mode.png)
 
 **(1)** Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um
 (alle Design-Tokens aus `DESIGN.md`, inklusive angepasster Marken- und KI-Farben).
@@ -407,7 +477,7 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ---
 
-## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1, 2 und 3)
+## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1, 2, 3 und 4)
 
 1. Registrierung → Org-Anlage → Onboarding-Wizard mit Stammdaten aus `org_profile` ✓
 2. Runner-Pairing über Pairing-Code + Token-Hash, gehärtet mit Rate-Limit,
@@ -427,7 +497,12 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
    Eingangs-Prüf-Workflow, Rechnungs-Editor mit DB-berechneten Summen +
    `next_number()`, XRechnung-3.0-Export (EN 16931, B2G-Leitweg-ID serverseitig
    erzwungen, Golden-File-getestet), Mahnwesen mit KI-Entwurf und Freigabe-Pflicht ✓
-9. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
+9. **Etappe 4:** Autonomie-Regler mit **serverseitigem Hochstufen-Gate**
+   (`set_autonomy_level`), Stufe-3-Halte-Zone mit Stopp (`stop_automation_run`),
+   Notizen + Sprachnotizen (Whisper lokal), `knowledge_distill` mit Review,
+   Meetings (`transcribe_meeting` lokal → `summarize_meeting`), kombinierte Suche
+   (`search_combined`: Volltext + `pgvector`, Query-Embedding lokal im Runner) ✓
+10. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
 
 Gegen echtes Supabase ist der Ablauf identisch — nur dass `supabase start` die
 Datenbank stellt, die Edge Functions in Deno laufen und Updates per Realtime statt

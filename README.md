@@ -77,7 +77,7 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
 [lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 36 Bildern:
+mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 42 Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
 ### Anmelden & Registrieren
@@ -211,18 +211,42 @@ Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *A
 
 ![Regeln](docs/testing-tutorial/img/35-regel-liste.png)
 
+### Autonomie-Regler, Halte-Zone, Wissen & Meetings (Etappe 4)
+
+Jede Automation hat einen Autonomie-Regler (1–4). Das **Hochstufen auf Stufe 3/4
+prüft der Server** (`set_autonomy_level`): erst ab nachgewiesener Trefferquote über
+genügend Läufe — nicht nur im UI:
+
+![Automationen](docs/testing-tutorial/img/34-automationen-regler.png)
+
+Stufe-3-Aktionen laufen durch eine **Halte-Zone**: sichtbar mit Countdown, ein Klick
+stoppt vor dem Versand (violett = KI):
+
+![Halte-Zone](docs/testing-tutorial/img/35-halte-zone.png)
+
+Der Runner destilliert dauerhaftes Firmenwissen aus Mails und Meetings
+(`knowledge_distill`) — Vorschläge werden geprüft, bevor sie ins Gedächtnis wandern:
+
+![Wissen](docs/testing-tutorial/img/37-wissen.png)
+
+Meetings: Audio hochladen → **Whisper transkribiert lokal** (keine Cloud) → KI-Protokoll
+mit Entscheidungen und Aufgaben:
+
+![Meetings](docs/testing-tutorial/img/38-meetings.png)
+
 ### App-Shell, CommandBar & Dark Mode
 
-Icon-Rail (56 px) → Kontext-Sidebar → Hauptfläche, alle Module navigierbar mit ehrlichen
-Phasen-Platzhaltern (kein Feature ohne Empty-State). CommandBar per Strg/Cmd+K — wird in
-Phase 4 zur globalen Suche (Volltext + semantisch via pgvector):
+Icon-Rail (56 px) → Kontext-Sidebar → Hauptfläche, alle Module navigierbar (kein Feature
+ohne Empty-State). CommandBar per Strg/Cmd+K ist die globale Suche: Volltext (`tsvector`)
+sofort, semantisch (`pgvector`) auf Knopfdruck — das Query-Embedding rechnet der Runner
+**lokal**, nie der Client:
 
-![CommandBar](docs/testing-tutorial/img/13-commandbar.png)
+![Suche](docs/testing-tutorial/img/39-suche.png)
 
 Vollwertiges dunkles Theme mit einem Klick, alle Design-Tokens aus
 [docs/DESIGN.md](docs/DESIGN.md):
 
-![Dark Mode](docs/testing-tutorial/img/36-dark-mode.png)
+![Dark Mode](docs/testing-tutorial/img/42-dark-mode.png)
 
 ---
 
@@ -238,7 +262,7 @@ Nutzbarem. Fertige Prompts pro Phase: [docs/ROADMAP_PROMPTS.md](docs/ROADMAP_PRO
 | **P1 — E-Mail-Hub** | Gmail-OAuth + Sync, Inbox (lesen/schreiben/senden mit 30s-Rückholen), `classify_email` + `case_match` + `draft_reply` + `thread_summary`, Vorgangsakte v1 → ab hier Dogfooding | ✅ **fertig** |
 | **P2 — Aufgaben & Briefing** | Aufgaben-Compiler (`extract_commitments`), Follow-up-Engine, Nacht-Wächter (`gap_scan`), Morgen-Briefing, Web-Push | ✅ **fertig** |
 | **P3 — Finanzen** | Eingangsrechnungs-Erfassung + Prüf-Workflow, Angebote/Rechnungen inkl. **XRechnung-XML** (EN 16931), Mahnwesen, Nummernkreise | ✅ **fertig** |
-| **P4 — Autonomie & Wissen** | Autonomie-Regler-UI mit Trefferquoten (TrustMeter), Stufe-3-Halte-Zone, Notizen, `knowledge_distill`, semantische Suche, Meetings (Whisper lokal) | geplant |
+| **P4 — Autonomie & Wissen** | Autonomie-Regler-UI mit Trefferquoten (TrustMeter), serverseitiges Hochstufen-Gate, Stufe-3-Halte-Zone, Notizen, `knowledge_distill`, semantische Suche (pgvector), Meetings (Whisper lokal) | ✅ **fertig** |
 | **P5 — Team & Papierkram** | Geteilte Postfächer, Kommentare/@Zuweisungen, Fristenkalender, IMAP-Fallback, Kalender-Sync, Wochenreport | geplant |
 | **P6 — Komplett-Büro** | Zeiterfassung + Abwesenheiten, Banking-Sync + Zahlungsabgleich, DATEV-Export, Anrufprotokolle, Vertragsregister mit Kündigungs-Wächter | geplant |
 | **P7 — Produktisierung** | Onboarding-Polish, Landing Page, Preismodell („keine KI-Kosten beim Anbieter“), gehosteter Runner als Option, Pen-Test | offen |

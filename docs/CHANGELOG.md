@@ -1,5 +1,75 @@
 # Changelog
 
+## Etappe 4 — Autonomie & Wissen (2026-07-08)
+
+Kompletter Phase-4-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `021_p4_autonomy_knowledge.sql`):
+
+- **Autonomie-Regler serverseitig:** RPC `set_autonomy_level` mit **Hochstufen-Gate** —
+  Stufe 3/4 gibt es erst ab `promote_threshold` Trefferquote über `promote_min_runs`
+  Läufe (aus `trust_stats`, erzwungen in der DB, nicht nur UI). Der Client verliert
+  per Spalten-Grant das Recht, `autonomy_level` direkt zu schreiben (nur noch
+  `is_enabled`, `min_confidence`, `hold_minutes`). Automationen-Seite mit Regler 1–4,
+  Erklärtexten pro Stufe, TrustMeter und Pausieren.
+- **Stufe-3-Halte-Zone (Regel 4):** `maybe_autoschedule_draft` plant automatische
+  Entwürfe (Nachfassen, Mahnungen) mit `send_after = jetzt + hold_minutes`, legt einen
+  `automation_runs`-Lauf mit `status='holding'` an und benachrichtigt. HoldBanner
+  (violett) in der App-Shell mit Sekunden-Countdown und **1-Klick-Stopp**
+  (`stop_automation_run` → Draft zurück auf Entwurf, Outcome `corrected`). Cron
+  `process_holding_runs` schließt abgelaufene Halte-Zonen ab; der Versand selbst
+  läuft über den bestehenden `send-mail {mode:'due'}`-Pfad. Stufe 4 sendet sofort.
+- **Notizen-Modul:** `notes` mit Markdown-Editor (Anlage/Bearbeiten/Löschen) und
+  **Sprachnotiz** (MediaRecorder → Bucket `audio` → Job `transcribe_note`, Whisper
+  **lokal** im Runner).
+- **Institutionelles Wissen:** Skill `knowledge_distill` (wöchentlich) destilliert
+  dauerhafte Fakten aus Mails/Meetings → `knowledge_items` (status `proposed`, Dedupe);
+  Review-UI (Bestätigen/Ablehnen). Skill `build_style_profile` lernt den Schreibstil
+  aus gesendeten Mails → `ai_style_profiles` (speist bereits `draft_reply`).
+- **Meetings:** Audio-Upload → Skill `transcribe_meeting` (whisper.cpp **lokal**, keine
+  Cloud) → Segmente + Folgejob `summarize_meeting` (KI-Protokoll, Entscheidungen,
+  offene Fragen, Aufgaben `source='meeting'`). Meeting-Detail mit Protokoll und
+  Case-Verknüpfung.
+- **Kombinierte Suche:** RPC `search_combined` (Volltext `tsvector` + semantisch
+  `pgvector`) über Mails, Vorgänge, Kontakte, Dokumente, Notizen, Wissen. CommandBar
+  zeigt Volltext-Treffer sofort; „Semantisch suchen“ startet einen interaktiven
+  `semantic_search`-Job (Priorität 1) — das Query-Embedding rechnet der **Runner
+  lokal** (Embedder-Adapter `LEITWERK_EMBED_BIN`, sonst deterministischer
+  Hash-Fallback), nie der Client. Backlog-Embeddings über Skill `embed_backlog`.
+- **Mock + E2E:** Mock spiegelt alle 021-RPCs/Trigger (Autonomie-Gate,
+  Halte-Zone + Stopp, `apply_job_result` v4, `search_combined`), seedet eine
+  Stufe-3-Aktion in der Halte-Zone; Mock-Binaries `whisper-mock.cjs` (deterministisches
+  Transkript) und Hash-Embeddings. E2E auf 42 Screenshots erweitert (Regler + Gate,
+  Halte-Zone + Stopp, Notizen, Wissen bestätigen, Meeting → Protokoll, kombinierte Suche).
+
+### Manuelle Schritte für den Betreiber (Deploy Etappe 4)
+
+1. **Migration einspielen:** `supabase db push` (neu: `021_p4_autonomy_knowledge.sql`).
+2. **Storage-Bucket anlegen** (einmalig, für Sprachnotizen + Meetings):
+   ```sql
+   insert into storage.buckets (id, name, public) values ('audio', 'audio', false)
+   on conflict (id) do nothing;
+   ```
+   RLS-Policies für `audio` analog zu `attachments` (nur eigene Org; siehe tutorials/).
+3. **pgvector aktivieren** (falls noch nicht): `create extension if not exists vector;`
+   (die Tabelle `embeddings` aus Migration 007 nutzt `vector(1024)`).
+4. **Edge Functions deployen:** `supabase functions deploy build-job-context mail-sync`.
+5. **pg_cron-Jobs anlegen** (SQL-Editor):
+   ```sql
+   select cron.schedule('holding-runs',   '* * * * *',  $$select public.process_holding_runs()$$);
+   select cron.schedule('knowledge',      '0 4 * * 6',  $$select public.enqueue_org_jobs('knowledge_distill', 9)$$);
+   select cron.schedule('style-profiles', '0 4 * * 0',  $$select public.enqueue_org_jobs('build_style_profile', 9)$$);
+   select cron.schedule('embed-backlog',  '30 2 * * *', $$select public.enqueue_org_jobs('embed_backlog', 9)$$);
+   ```
+6. **Runner-Setup für lokale KI-Nebenläufe** (pro Nutzer, optional aber empfohlen —
+   siehe `tutorials/05_runner_installation.md (Abschnitt 6)`):
+   - `LEITWERK_WHISPER_BIN` → Wrapper um whisper.cpp (Meetings/Sprachnotizen).
+   - `LEITWERK_EMBED_BIN` → lokales Embedding-Modell (1024-dim, z. B. bge-m3);
+     ohne Konfiguration nutzt der Runner ein deterministisches Hash-Embedding
+     (grobe Ähnlichkeit, offline — für Produktion Modell setzen).
+7. **PWA neu bauen/deployen:** `pnpm --filter @leitwerk/pwa build`.
+8. **Runner aktualisieren** (alle Nutzer): `npm update -g leitwerk-runner`
+   (neue Skills `transcribe_note`, `transcribe_meeting`, `summarize_meeting`,
+   `knowledge_distill`, `build_style_profile`, `embed_backlog`, `semantic_search`).
+
 ## Etappe 3 — Finanzen: E-Rechnung, XRechnung, Mahnwesen (2026-07-08)
 
 Kompletter Phase-3-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `020_p3_finance.sql`):

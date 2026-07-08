@@ -78,3 +78,25 @@ Beim `init` automatisch erkannt (Wechsel: `leitwerk-runner init` erneut ausführ
   verbundenen Konten (z. B. eigenes Gmail).
 - Das Claude-Login bleibt lokal auf dem Rechner; Leitwerk sieht es nie.
 - Der Runner kann jederzeit in der App entkoppelt/deaktiviert werden (Token wird ungültig).
+
+## 6. Lokale KI-Nebenläufe: Whisper & Embeddings (Etappe 4)
+Meetings/Sprachnotizen und die semantische Suche laufen **lokal** auf dem Runner —
+keine Cloud. Beide sind optional konfigurierbar über Umgebungsvariablen:
+
+- **`LEITWERK_WHISPER_BIN`** — Pfad zu einem Programm, das eine Audiodatei transkribiert.
+  Vertrag: Argument = Audiodatei-Pfad, stdout = JSON
+  `{"transcript": "…", "segments": [{"speaker": null, "starts_sec": 0, "ends_sec": 4.2, "content": "…"}]}`.
+  Typisch ein kleiner Wrapper um [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
+  Ohne diese Variable schlagen `transcribe_note`/`transcribe_meeting` mit einer klaren
+  Meldung fehl (bewusst KEIN Cloud-Fallback).
+
+- **`LEITWERK_EMBED_BIN`** — Pfad zu einem Programm für lokale Embeddings (1024-dim).
+  Vertrag: stdin = JSON `{"texts": ["…"]}`, stdout = JSON
+  `{"embeddings": [[…1024 Zahlen…]], "model": "<name>"}`. Empfohlen ein Modell wie
+  `bge-m3` oder `multilingual-e5-large` (z. B. via llama.cpp `llama-embedding`).
+  **Ohne** diese Variable nutzt der Runner ein deterministisches **Hash-Embedding**
+  (grobe Wortähnlichkeit, offline) — die semantische Suche funktioniert damit, ist aber
+  weniger treffsicher als mit echtem Modell. Für Produktion ein Modell setzen.
+
+Beide Programme müssen ausführbar sein (`chmod +x`). Nach dem Setzen der Variablen den
+Runner neu starten.
