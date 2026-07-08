@@ -11,6 +11,7 @@ import { Login } from "./routes/Login";
 import { MailSettings } from "./routes/MailSettings";
 import { Meetings } from "./routes/Meetings";
 import { Notes } from "./routes/Notes";
+import { Office } from "./routes/Office";
 import { Onboarding } from "./routes/Onboarding";
 import { Register } from "./routes/Register";
 import { RulesSettings } from "./routes/RulesSettings";
@@ -50,6 +51,7 @@ export function App() {
         <Route path="notizen" element={<Notes />} />
         <Route path="meetings" element={<Meetings />} />
         <Route path="kalender" element={<Calendar />} />
+        <Route path="buero" element={<Office />} />
         <Route
           path="einstellungen"
           element={<Navigate to="/einstellungen/runner" replace />}

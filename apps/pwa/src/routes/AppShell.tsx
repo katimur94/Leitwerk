@@ -1,4 +1,5 @@
 import {
+  Briefcase,
   CalendarClock,
   CheckSquare,
   Cpu,
@@ -35,6 +36,7 @@ const railItems = [
   { to: "/notizen", end: false, icon: NotebookPen, labelKey: "nav.notes" },
   { to: "/meetings", end: false, icon: Mic2, labelKey: "nav.meetings" },
   { to: "/kalender", end: false, icon: CalendarClock, labelKey: "nav.calendar" },
+  { to: "/buero", end: false, icon: Briefcase, labelKey: "nav.office" },
 ] as const;
 
 function RailLink({
