@@ -6,8 +6,8 @@
 |---|---|---|
 | Phase 0 — Fundament | ✅ abgeschlossen | inkl. Mock-Umgebung + Screenshot-Tutorial |
 | Etappe 0.5 — Security- & Robustheits-Fixes | ✅ abgeschlossen (2026-07-08) | Migration 017; Details im CHANGELOG |
-| **Etappe 1 — E-Mail-Hub + Vorgangsakte** | ✅ abgeschlossen (2026-07-08) | Migration 018; `mail_received`/`mail_sent` an org_rules angebunden; E2E 29 Screenshots grün |
-| Etappe 2 — Aufgaben-Compiler, Wächter, Briefing | ⬜ offen | Phase-2-Prompt aus ROADMAP_PROMPTS.md |
+| Etappe 1 — E-Mail-Hub + Vorgangsakte | ✅ abgeschlossen (2026-07-08) | Migration 018; `mail_received`/`mail_sent` an org_rules angebunden |
+| **Etappe 2 — Aufgaben-Compiler, Wächter, Briefing** | ✅ abgeschlossen (2026-07-08) | Migration 019; E2E 33 Screenshots grün |
 | Etappe 3 — Finanzen | ⬜ offen | |
 | Etappe 4 — Autonomie & Wissen | ⬜ offen | |
 | Etappe 5 — Team & Ausbau | ⬜ offen | |
@@ -15,7 +15,7 @@
 
 ## Wartet auf manuellen Deploy (Betreiber)
 
-Etappe 0.5 UND Etappe 1 sind im Code fertig, aber auf dem echten Supabase-Projekt
+Die Etappen 0.5, 1 und 2 sind im Code fertig, aber auf dem echten Supabase-Projekt
 noch NICHT eingespielt. Bitte in dieser Reihenfolge ausführen (Details im CHANGELOG
 unter „Manuelle Schritte“ der jeweiligen Etappe):
 
@@ -30,21 +30,26 @@ supabase functions deploy runner-broker
 supabase functions deploy oauth-gmail mail-sync send-mail build-job-context
 # 3. Cron: mail-sync (*/2) + send-due-mail (pg_net) — SQL im CHANGELOG
 
+# Etappe 2 (zusätzlich)
+# 4. VAPID-Keys (npx web-push generate-vapid-keys) → Secrets + VITE_VAPID_PUBLIC_KEY
+supabase functions deploy send-push
+# 5. Cron: gap-scan, morning-brief, followup-check, send-push — SQL im CHANGELOG
+
 pnpm --filter @leitwerk/pwa build             # PWA deployen
 ```
 
-Etappe 2 kann lokal gegen den Mock-Server weitergebaut werden — der Mock bildet
-die Migrationen 017 + 018 bereits ab (Demo-Postfach, Mini-Gmail-API, Trigger, RPCs).
+Etappe 3 kann lokal gegen den Mock-Server weitergebaut werden — der Mock bildet
+die Migrationen 017–019 bereits ab (Demo-Postfach, Mini-Gmail-API, Trigger, RPCs,
+Watchdog-Cron-Ersatz).
 
-## Notizen für Etappe 2
+## Notizen für Etappe 3 (Finanzen)
 
-- `extract_commitments`-Skill: Kontext-Assembly in `build-job-context` ergänzen,
-  Anwendung in `apply_job_result` (tasks source='mail_extract' als Vorschlag).
-- Ereignis `task_created` durch `evaluate_org_rules` schleusen (Trigger auf tasks).
-- Follow-ups/gap_scan/morning_briefing: Cron-Blöcke aus 009 aktivieren (Betreiber),
-  Findings/Briefings landen in bestehenden Tabellen (008).
-- Neue Job-Skills brauchen `schemaDescription` (schlanker Reparatur-Retry);
-  Connector-Jobs ohne KI implementieren `execute()`.
-- Schema-Änderungen nur als Migration 019 aufwärts; RLS-Muster aus 009.
-- Mock-Server: neue Job-Typen in `tools/mock-server/mail-hub.mjs` (buildContext +
-  applyJobResult) und `claude-mock.cjs` ergänzen; E2E-Schritte anhängen.
+- Phase-3-Prompt aus ROADMAP_PROMPTS.md: extract_invoice (ZUGFeRD/XRechnung-XML
+  direkt parsen, sonst KI aus PDF-Text), Prüf-Workflow invoices_in,
+  Ausgangsrechnungen/Angebote mit next_number(), export-xrechnung (EN16931),
+  Mahnwesen (dunning_runs, automation auto_dunning), Finanz-Übersicht.
+- Ereignisse invoice_captured/quote_sent/invoice_paid durch evaluate_org_rules.
+- Viewer-Rolle: RLS existiert (009) — UI ebenfalls absichern.
+- Golden-File-Test für XRechnung-XML (Pflicht laut CLAUDE.md Regel 10).
+- Neue Job-Skills brauchen `schemaDescription`; Schema-Änderungen nur als
+  Migration 020 aufwärts; Mock (`mail-hub.mjs`, `claude-mock.cjs`) + E2E mitziehen.

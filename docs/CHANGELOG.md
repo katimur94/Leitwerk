@@ -1,5 +1,73 @@
 # Changelog
 
+## Etappe 2 — Aufgaben-Compiler, Wächter, Briefing (2026-07-08)
+
+Kompletter Phase-2-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `019_p2_tasks_watchdog.sql`):
+
+- **Aufgaben-Compiler:** Skill `extract_commitments` (Verpflichtungen/Fristen aus jeder
+  Inbound-Mail, Dubletten-Hinweis über bestehende Aufgaben derselben Quelle) →
+  `tasks` source='mail_extract' mit AiBadge-Annahme-UI; „Verwerfen“ meldet
+  `outcome='wrong'` in die Trefferquote. Job wird vom Trigger `on_mail_received`
+  eingereiht (Automation `auto_extract_tasks`).
+- **Aufgabenmodul komplett:** Liste mit Filtern, Anlage, Erledigen, Checklisten
+  (`task_checklist_items`), Fälligkeit, Zuweisungs-Benachrichtigung
+  (`task_assigned`), einfache Wiederholung (`recurrence.every_days` → Folgeaufgabe
+  beim Erledigen), 3-Tage-Snooze (`snoozes`).
+- **Follow-up-Engine:** `on_mail_sent_message` legt pro ausgehender Mail ein
+  Follow-up an (Automation `auto_followup`, Standardfrist 4 Tage, Upsert);
+  eingehende Antwort setzt es auf `answered`. Skill `followup_check` (stündlicher
+  Cron) bewertet Überfälliges: `escalate` → Finding (dedupe `followup:<id>`) +
+  automatischer Nachfass-Entwurf über die bestehende draft_reply-Pipeline
+  (mail_drafts source='automation'). Kein Überfälliges = kein KI-Aufruf.
+- **Nacht-Wächter:** Skill `gap_scan` — Kontext liefert inaktive Vorgänge (≥5 Tage),
+  unbeantwortete Mails (≥2 Tage), überfällige Follow-ups/Aufgaben; Findings landen
+  dedupliziert in `agent_findings`, Severity ≤ 2 benachrichtigt sofort (notify_org),
+  `finding_created` läuft durch die Regel-Engine.
+- **Morgen-Briefing:** Skill `morning_briefing` → `briefings` (kind='morning',
+  einmal pro Tag) + Benachrichtigung; „Heute“-Seite zeigt BriefingCards
+  (nummerierte Punkte mit direkter Aktion), offene Findings (Erledigt/Verwerfen)
+  und überfällige Follow-ups.
+- **Web-Push + Notification-Center:** Glocke in der Icon-Rail (Ungelesen-Punkt,
+  Panel, Auto-Gelesen), Web-Push-Abo (VAPID, `push_subscriptions`); Service-Worker-
+  Handler via workbox.importScripts (`public/push-sw.js`); neue Edge Function
+  **`send-push`** (npm:web-push) stellt ungepushte `notifications` zu
+  (`pushed_at`-Queue, Cron + pg_net) und räumt tote Subscriptions ab.
+- **TrustMeter:** neue Design-System-Komponente (Fortschrittsring, grün ab
+  promote_threshold); Einstellungen → Automationen zeigt alle Automationen mit
+  Trefferquote aus `trust_stats`.
+- **Mock + E2E:** Mock bildet alle 019-Trigger/-Anwendungen ab (inkl. Watchdog-Cron-
+  Ersatz mit echten Prioritäten 6/7/8); Demo-Postfach enthält jetzt eine 3 Tage
+  alte unbeantwortete Mail für den Wächter. E2E auf 33 Screenshots erweitert —
+  komplett grün; nebenbei bewiesen: das Nachtfenster blockiert Priority-8-Jobs
+  tagsüber (Abo-Schutz aus Etappe 0.5 greift serverseitig).
+
+### Manuelle Schritte für den Betreiber (Deploy Etappe 2)
+
+1. **Migration einspielen:** `supabase db push` (neu: `019_p2_tasks_watchdog.sql`).
+2. **VAPID-Schlüsselpaar erzeugen** (einmalig): `npx web-push generate-vapid-keys`.
+   Secrets setzen:
+   ```bash
+   supabase secrets set VAPID_PUBLIC_KEY=…
+   supabase secrets set VAPID_PRIVATE_KEY=…
+   supabase secrets set VAPID_SUBJECT=mailto:<deine-mail>
+   ```
+   Und in der PWA-Umgebung: `VITE_VAPID_PUBLIC_KEY=<Public Key>` (`.env`).
+3. **Edge Functions deployen:** `supabase functions deploy build-job-context send-push`.
+4. **pg_cron-Jobs anlegen** (SQL-Editor):
+   ```sql
+   select cron.schedule('gap-scan',       '0 3 * * *',    $$select public.enqueue_org_jobs('gap_scan', 8)$$);
+   select cron.schedule('morning-brief',  '30 5 * * 1-5', $$select public.enqueue_org_jobs('morning_briefing', 6)$$);
+   select cron.schedule('followup-check', '0 * * * *',    $$select public.enqueue_org_jobs('followup_check', 7)$$);
+   select cron.schedule('send-push', '* * * * *', $$
+     select net.http_post(
+       url    := 'https://<PROJECT_REF>.supabase.co/functions/v1/send-push',
+       headers:= jsonb_build_object('Content-Type','application/json',
+                                    'Authorization','Bearer <SERVICE_ROLE_KEY>'),
+       body   := '{"mode":"due"}'::jsonb)$$);
+   ```
+5. **PWA neu bauen/deployen:** `pnpm --filter @leitwerk/pwa build`.
+6. **Runner aktualisieren** (alle Nutzer): `npm update -g leitwerk-runner`.
+
 ## Etappe 1 — E-Mail-Hub + Vorgangsakte (2026-07-08)
 
 Kompletter Phase-1-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `018_p1_mail_hub.sql`):

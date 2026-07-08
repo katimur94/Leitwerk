@@ -77,7 +77,7 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
 [lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 29 Bildern:
+mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 33 Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
 ### Anmelden & Registrieren
@@ -171,6 +171,16 @@ Nummernkreis und Status-Workflow:
 
 ![Vorgangsakte](docs/testing-tutorial/img/26-vorgang-detail.png)
 
+### Aufgaben-Compiler, Nacht-Wächter & Morgen-Briefing (Etappe 2)
+
+`extract_commitments` übersetzt Mails in Aufgaben-Vorschläge (violett, mit
+Feedback-Schleife), der Nacht-Wächter (`gap_scan`) findet Liegengebliebenes, und
+`morning_briefing` startet den Tag mit den wichtigsten Punkten samt direkter Aktion.
+Die Follow-up-Engine fasst automatisch nach, wenn Antworten ausbleiben; Web-Push
+bringt Benachrichtigungen aufs Gerät:
+
+![Heute-Briefing](docs/testing-tutorial/img/26-heute-briefing.png)
+
 ### Regel-Engine light (Einstellungen → Regeln)
 
 Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *Aktion*
@@ -205,7 +215,7 @@ Nutzbarem. Fertige Prompts pro Phase: [docs/ROADMAP_PROMPTS.md](docs/ROADMAP_PRO
 | **P0 — Fundament** | Monorepo, Migrationen, Auth + Orgs, Onboarding, Runner-Pairing, Echo-Job Ende-zu-Ende, CI | ✅ **fertig** |
 | **P0.5 — Security-Härtung** | Zwei-Stufen-Pairing, Rate-Limits, Abo-Schutz (Limits + Nachtfenster), Regel-Engine light, `service install` | ✅ **fertig** |
 | **P1 — E-Mail-Hub** | Gmail-OAuth + Sync, Inbox (lesen/schreiben/senden mit 30s-Rückholen), `classify_email` + `case_match` + `draft_reply` + `thread_summary`, Vorgangsakte v1 → ab hier Dogfooding | ✅ **fertig** |
-| **P2 — Aufgaben & Briefing** | Aufgaben-Compiler (`extract_commitments`), Follow-up-Engine, Nacht-Wächter (`gap_scan`), Morgen-Briefing, Web-Push | geplant |
+| **P2 — Aufgaben & Briefing** | Aufgaben-Compiler (`extract_commitments`), Follow-up-Engine, Nacht-Wächter (`gap_scan`), Morgen-Briefing, Web-Push | ✅ **fertig** |
 | **P3 — Finanzen** | Eingangsrechnungs-Erfassung + Prüf-Workflow, Angebote/Rechnungen inkl. **ZUGFeRD-PDF + XRechnung-XML**, Mahnwesen, Nummernkreise | geplant |
 | **P4 — Autonomie & Wissen** | Autonomie-Regler-UI mit Trefferquoten (TrustMeter), Stufe-3-Halte-Zone, Notizen, `knowledge_distill`, semantische Suche, Meetings (Whisper lokal) | geplant |
 | **P5 — Team & Papierkram** | Geteilte Postfächer, Kommentare/@Zuweisungen, Fristenkalender, IMAP-Fallback, Kalender-Sync, Wochenreport | geplant |
