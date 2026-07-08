@@ -161,9 +161,12 @@ async function handleFail(
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST") return json({ error: "Nur POST" }, 405);
 
   const action = new URL(req.url).pathname.split("/").filter(Boolean).pop();
+  // Deploy-Verifikation (tutorials/03), bewusst ohne Auth
+  if (action === "health") return json({ ok: true });
+  if (req.method !== "POST") return json({ error: "Nur POST" }, 405);
+
   const db = serviceClient();
 
   try {
