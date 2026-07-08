@@ -87,6 +87,103 @@ function answerFor(prompt) {
     };
   }
 
+  // extract_commitments
+  if (prompt.includes("Extrahiere aus der folgenden E-Mail")) {
+    const subject = (prompt.match(/^Betreff: (.*)$/m) || [])[1] || "";
+    const body = prompt.split("---")[1] || "";
+    const hay = `${subject} ${body}`.toLowerCase();
+    const commitments = [];
+    if (hay.includes("angebot")) {
+      commitments.push({
+        title: "Angebot für Elektroarbeiten erstellen",
+        due_at: null,
+        reason: "Kunde bittet um ein Angebot",
+        confidence: 0.92,
+      });
+    }
+    if (hay.includes("unterlagen") || hay.includes("vertrag")) {
+      commitments.push({
+        title: "Vertragsunterlagen zusenden",
+        due_at: null,
+        reason: "Unterlagen wurden angefordert",
+        confidence: 0.9,
+      });
+    }
+    if (hay.includes("termin") || hay.includes("passt ihnen")) {
+      commitments.push({
+        title: "Terminvorschlag bestätigen",
+        due_at: null,
+        reason: "Terminvorschlag wartet auf Antwort",
+        confidence: 0.88,
+      });
+    }
+    return { commitments };
+  }
+
+  // gap_scan
+  if (prompt.includes("Nacht-Wächter")) {
+    const threadMatch = prompt.match(/- \[([0-9a-f-]{36})\] "(.*?)" von (\S+)/);
+    const caseMatch = prompt.match(/- \[([0-9a-f-]{36})\] (V-\d{4}-\d+) "(.*?)"/);
+    const findings = [];
+    if (threadMatch) {
+      findings.push({
+        kind: "gap",
+        severity: 2,
+        title: `Unbeantwortet: „${threadMatch[2]}“`,
+        description: `${threadMatch[3]} wartet auf eine Antwort. (Mock)`,
+        dedupe_key: `unanswered:${threadMatch[1]}`,
+        case_id: null,
+      });
+    }
+    if (caseMatch) {
+      findings.push({
+        kind: "stale",
+        severity: 3,
+        title: `Vorgang ${caseMatch[2]} liegt still`,
+        description: "Keine Aktivität seit mehreren Tagen. (Mock)",
+        dedupe_key: `stale:${caseMatch[2]}`,
+        case_id: caseMatch[1],
+      });
+    }
+    return { findings };
+  }
+
+  // morning_briefing
+  if (prompt.includes("Morgen-Briefing")) {
+    const items = [];
+    const itemRe = /- \[(\w+)\/([0-9a-f-]{36})\] (.*?)(?: — (.*))?$/gm;
+    let m;
+    while ((m = itemRe.exec(prompt)) && items.length < 5) {
+      items.push({
+        title: m[3],
+        detail: m[4] || "",
+        entity_type: m[1],
+        entity_id: m[2],
+        action: m[1] === "mail_thread" ? "Thread öffnen" : m[1] === "task" ? "Aufgabe öffnen" : "Ansehen",
+      });
+    }
+    return {
+      content_md:
+        "Guten Morgen. Heute zählen vor allem die unbeantworteten Kundenmails und die " +
+        "fälligen Aufgaben — Leitwerk hat die wichtigsten Punkte unten sortiert. (Mock)",
+      items,
+    };
+  }
+
+  // followup_check
+  if (prompt.includes("überfälligen Follow-ups")) {
+    const ids = [...prompt.matchAll(/- \[([0-9a-f-]{36})\]/g)].map((m) => m[1]);
+    return {
+      followups: ids.map((id) => ({
+        followup_id: id,
+        action: "escalate",
+        title: "Antwort überfällig",
+        description: "Seit mehreren Tagen keine Antwort. (Mock)",
+        draft_instructions: "Freundlich und kurz nachfassen, auf die letzte Mail verweisen.",
+      })),
+    };
+  }
+
   // thread_summary
   if (prompt.includes("Fasse den folgenden E-Mail-Thread")) {
     return {
