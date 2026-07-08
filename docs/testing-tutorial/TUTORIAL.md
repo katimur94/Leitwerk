@@ -1,6 +1,6 @@
-# Leitwerk Phase 0 — Test-Tutorial (lokal, ohne Supabase)
+# Leitwerk — Test-Tutorial (lokal, ohne Supabase) · Phasen 0–3
 
-Dieses Tutorial zeigt **jedes Phase-0-Feature** mit annotierten Screenshots — aufgenommen
+Dieses Tutorial zeigt **jedes Feature der Phasen 0 bis 3** mit annotierten Screenshots — aufgenommen
 gegen die **lokale Mock-Umgebung**, die komplett ohne Supabase/Docker läuft. Alle
 Screenshots stammen aus einem automatisierten Ende-zu-Ende-Lauf
 (`tools/e2e-tutorial/run.mjs`) und lassen sich jederzeit reproduzieren.
@@ -155,14 +155,14 @@ Das Layout nach `docs/DESIGN.md`: **(1)** Icon-Rail (56 px) mit den fünf Hauptm
 Phase 2 das Morgen-Briefing — bis dahin führt der Empty-State ehrlich zum nächsten
 sinnvollen Schritt. **(4)** Einstellungen und **(5)** Theme-Umschalter unten in der Rail.
 
-## 12 · Modul-Platzhalter
+## 12 · Finanzen (leer)
 
-![Modul-Platzhalter](img/12-modul-platzhalter.png)
+![Finanzen leer](img/12-finanzen-leer.png)
 
-**(1)** Alle Module sind navigierbar, **(2)** noch nicht gebaute zeigen statt leerer
-Flächen einen Empty-State mit ihrer Phase (Finanzen → Phase 3). Posteingang, Vorgänge
-(Etappe 1) und Aufgaben (Etappe 2) sind produktiv — Abschnitte 18–30.
-Kein Feature ohne Empty-State — Regel 9 aus `CLAUDE.md`.
+**(1)** Das Finanzen-Modul (Etappe 3) direkt nach dem Onboarding: **(2)** noch keine
+Daten — die Übersichts-Kacheln stehen ehrlich auf 0,00 €, jeder Tab zeigt seinen
+Empty-State statt leerer Flächen. Kein Feature ohne Empty-State — Regel 9 aus
+`CLAUDE.md`. Gefüllt wird das Modul in den Abschnitten 31–33.
 
 ## 13 · CommandBar (Strg/Cmd + K)
 
@@ -337,9 +337,50 @@ Zeitstempel — **violetter Punkt = KI-Eintrag** (eiserne Design-Regel).
 **(2)** Verknüpfte E-Mail-Threads; ab Phase 2/3 hängen hier auch Aufgaben und Belege.
 **(3)** Status-Wechsel direkt in der Akte.
 
-## 31 · Regel-Builder (Einstellungen → Regeln)
+## 31 · Eingangsrechnung automatisch erfasst (Etappe 3)
 
-![Regel-Builder](img/31-regel-builder.png)
+![Finanzen Eingang](img/31-finanzen-eingang.png)
+
+**(1)** Die Demo-Mail „Rechnung RE-88123“ trägt einen E-Rechnungs-Anhang (ZUGFeRD/CII-XML).
+`classify_email` erkennt die Kategorie `rechnung` und stößt `extract_invoice` an — der
+Runner liest das **XML direkt und deterministisch**, ganz ohne KI (Konfidenz 100 %);
+nur wenn kein E-Rechnungs-XML vorliegt, extrahiert die KI aus dem PDF-Text bzw. Mailtext.
+**(2)** Das violette Badge „E-Rechnung“ zeigt Format und Herkunft. Die Erfassung ist
+idempotent (Dedupe über die Quell-Nachricht) und markiert Dubletten (gleiche Nummer +
+Betrag). **(3)** Der Prüf-Workflow: erfasst → in Prüfung → freigegeben → bezahlt —
+jede Stufe protokolliert, wer sie ausgelöst hat. Das Ereignis `invoice_captured`
+läuft zusätzlich durch die Regel-Engine.
+
+## 32 · Rechnungs-Editor + XRechnung-Export
+
+![Rechnungs-Editor](img/32-rechnung-editor.png)
+
+**(1)** Ausgangsrechnungen (und Angebote) mit Positionsliste nach dem MoneyCell-Prinzip:
+Beträge rechtsbündig, `tabular-nums`, gerechnet in Cent. Netto/USt./Brutto berechnet
+**die Datenbank** per Trigger bei jeder Positionsänderung — der Client zeigt nur an.
+Die Rechnungsnummer kommt atomar aus dem Nummernkreis (`next_number()`).
+**(2)** „XRechnung-XML“ ruft die Edge Function `export-xrechnung` auf: deterministisches
+UBL 2.1 nach **EN 16931 / XRechnung 3.0**, per Golden-File-Test abgesichert.
+**(3)** Das XML landet im Export-Bucket und an der Rechnung (`xml_storage_path`).
+**(4)** Für öffentliche Auftraggeber (B2G) erzwingt die Funktion **serverseitig** die
+Leitweg-ID als Käuferreferenz (HTTP 422 statt stillschweigend ungültigem XML).
+Viewer-Rollen sehen das Finanzmodul überhaupt nicht (RLS + UI).
+
+## 33 · Mahnwesen mit KI-Entwurf
+
+![Mahnwesen](img/33-mahnwesen.png)
+
+Der tägliche Cron `process_overdue_invoices` findet überfällige Rechnungen (Demo:
+10 Tage über Fälligkeit) und legt **Vorschläge** an — nie mehr: **(1)** Mahnstufe 1–3
+mit Gebühren aus dem Firmenprofil und 7 Tagen Abstand zwischen den Stufen, violett,
+weil der Mahntext von der KI kommt (`draft_dunning`). **(2)** Versand gibt es NUR nach
+Freigabe — der Entwurf geht dann durch denselben geplanten Versand wie jede Mail
+(30-Sekunden-Rückholen inklusive, Regel 4). **(3)** Überspringen ist immer eine Option
+und wird protokolliert.
+
+## 34 · Regel-Builder (Einstellungen → Regeln)
+
+![Regel-Builder](img/34-regel-builder.png)
 
 Die Regel-Engine light (Etappe 0.5): **(1)** Jede Regel folgt dem Muster „Wenn
 *Ereignis* und *Bedingungen*, dann *Aktion*“. **(2)** Ereignisse wie `mail_received`,
@@ -348,17 +389,17 @@ Modulen ausgelöst. **(3)** Bedingungen prüfen Felder der Entity (UND-verknüpf
 von „ist gleich“ bis „fehlt“). **(4)** Ausgewertet wird serverseitig durch die
 Postgres-Funktion `evaluate_org_rules` — Aktionen: Benachrichtigung, Aufgabe oder KI-Job.
 
-## 32 · Regel aktiv
+## 35 · Regel aktiv
 
-![Regel-Liste](img/32-regel-liste.png)
+![Regel-Liste](img/35-regel-liste.png)
 
 **(1)** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede Ausführung
 landet im Audit-Log (`rule.executed`). Seit Etappe 1 feuern `mail_received` und
 `mail_sent` bei jeder synchronisierten bzw. gesendeten Nachricht durch die Engine.
 
-## 33 · Dark Mode
+## 36 · Dark Mode
 
-![Dark Mode](img/33-dark-mode.png)
+![Dark Mode](img/36-dark-mode.png)
 
 **(1)** Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um
 (alle Design-Tokens aus `DESIGN.md`, inklusive angepasster Marken- und KI-Farben).
@@ -366,7 +407,7 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ---
 
-## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1 und 2)
+## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1, 2 und 3)
 
 1. Registrierung → Org-Anlage → Onboarding-Wizard mit Stammdaten aus `org_profile` ✓
 2. Runner-Pairing über Pairing-Code + Token-Hash, gehärtet mit Rate-Limit,
@@ -382,7 +423,11 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
    auf „Heute“), Follow-up-Engine (Anlage bei Send, Erledigung bei Antwort),
    Notification-Center, TrustMeter ✓ — inklusive Beweis, dass das Nachtfenster
    Priority-8-Jobs tagsüber blockiert
-8. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
+8. **Etappe 3:** `extract_invoice` (E-Rechnungs-XML deterministisch, sonst KI) →
+   Eingangs-Prüf-Workflow, Rechnungs-Editor mit DB-berechneten Summen +
+   `next_number()`, XRechnung-3.0-Export (EN 16931, B2G-Leitweg-ID serverseitig
+   erzwungen, Golden-File-getestet), Mahnwesen mit KI-Entwurf und Freigabe-Pflicht ✓
+9. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
 
 Gegen echtes Supabase ist der Ablauf identisch — nur dass `supabase start` die
 Datenbank stellt, die Edge Functions in Deno laufen und Updates per Realtime statt

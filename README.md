@@ -77,7 +77,7 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
 [lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 33 Bildern:
+mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 36 Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
 ### Anmelden & Registrieren
@@ -169,7 +169,7 @@ nie ohne Freigabe, und jedes Senden hat ein serverseitig erzwungenes
 Die Vorgangsakte bündelt alles mit Timeline (violetter Punkt = KI-Eintrag),
 Nummernkreis und Status-Workflow:
 
-![Vorgangsakte](docs/testing-tutorial/img/26-vorgang-detail.png)
+![Vorgangsakte](docs/testing-tutorial/img/30-vorgang-detail.png)
 
 ### Aufgaben-Compiler, Nacht-Wächter & Morgen-Briefing (Etappe 2)
 
@@ -181,6 +181,27 @@ bringt Benachrichtigungen aufs Gerät:
 
 ![Heute-Briefing](docs/testing-tutorial/img/26-heute-briefing.png)
 
+### Finanzen: E-Rechnung, XRechnung-Export & Mahnwesen (Etappe 3)
+
+Eingangsrechnungen erfasst der Runner direkt aus dem Mail-Anhang: liegt ein
+E-Rechnungs-XML (ZUGFeRD/XRechnung) bei, wird es **deterministisch ohne KI** gelesen —
+sonst extrahiert die KI aus PDF-Text bzw. Mailtext. Danach: Prüf-Workflow
+(erfasst → geprüft → freigegeben → bezahlt) mit Dubletten-Erkennung:
+
+![Eingangsrechnung](docs/testing-tutorial/img/31-finanzen-eingang.png)
+
+Ausgangsrechnungen und Angebote mit Positionsliste (Summen rechnet die Datenbank,
+Nummern kommen atomar aus `next_number()`) und **XRechnung-3.0-Export** (UBL 2.1,
+EN 16931, Golden-File-getestet; B2G-Leitweg-ID serverseitig erzwungen):
+
+![Rechnungs-Editor](docs/testing-tutorial/img/32-rechnung-editor.png)
+
+Das Mahnwesen schlägt bei überfälligen Rechnungen bis zu drei Stufen mit KI-Entwurf
+vor — versendet wird ausschließlich nach Freigabe, über denselben geplanten Versand
+mit 30-Sekunden-Rückholen wie jede Mail:
+
+![Mahnwesen](docs/testing-tutorial/img/33-mahnwesen.png)
+
 ### Regel-Engine light (Einstellungen → Regeln)
 
 Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *Aktion*
@@ -188,7 +209,7 @@ Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *A
 (`evaluate_org_rules`); ab Phase 1 schleusen alle Module ihre Ereignisse
 (`mail_received`, `invoice_captured`, `quote_sent`, `payment_matched`, …) hindurch:
 
-![Regeln](docs/testing-tutorial/img/28-regel-liste.png)
+![Regeln](docs/testing-tutorial/img/35-regel-liste.png)
 
 ### App-Shell, CommandBar & Dark Mode
 
@@ -201,7 +222,7 @@ Phase 4 zur globalen Suche (Volltext + semantisch via pgvector):
 Vollwertiges dunkles Theme mit einem Klick, alle Design-Tokens aus
 [docs/DESIGN.md](docs/DESIGN.md):
 
-![Dark Mode](docs/testing-tutorial/img/29-dark-mode.png)
+![Dark Mode](docs/testing-tutorial/img/36-dark-mode.png)
 
 ---
 
@@ -216,7 +237,7 @@ Nutzbarem. Fertige Prompts pro Phase: [docs/ROADMAP_PROMPTS.md](docs/ROADMAP_PRO
 | **P0.5 — Security-Härtung** | Zwei-Stufen-Pairing, Rate-Limits, Abo-Schutz (Limits + Nachtfenster), Regel-Engine light, `service install` | ✅ **fertig** |
 | **P1 — E-Mail-Hub** | Gmail-OAuth + Sync, Inbox (lesen/schreiben/senden mit 30s-Rückholen), `classify_email` + `case_match` + `draft_reply` + `thread_summary`, Vorgangsakte v1 → ab hier Dogfooding | ✅ **fertig** |
 | **P2 — Aufgaben & Briefing** | Aufgaben-Compiler (`extract_commitments`), Follow-up-Engine, Nacht-Wächter (`gap_scan`), Morgen-Briefing, Web-Push | ✅ **fertig** |
-| **P3 — Finanzen** | Eingangsrechnungs-Erfassung + Prüf-Workflow, Angebote/Rechnungen inkl. **ZUGFeRD-PDF + XRechnung-XML**, Mahnwesen, Nummernkreise | geplant |
+| **P3 — Finanzen** | Eingangsrechnungs-Erfassung + Prüf-Workflow, Angebote/Rechnungen inkl. **XRechnung-XML** (EN 16931), Mahnwesen, Nummernkreise | ✅ **fertig** |
 | **P4 — Autonomie & Wissen** | Autonomie-Regler-UI mit Trefferquoten (TrustMeter), Stufe-3-Halte-Zone, Notizen, `knowledge_distill`, semantische Suche, Meetings (Whisper lokal) | geplant |
 | **P5 — Team & Papierkram** | Geteilte Postfächer, Kommentare/@Zuweisungen, Fristenkalender, IMAP-Fallback, Kalender-Sync, Wochenreport | geplant |
 | **P6 — Komplett-Büro** | Zeiterfassung + Abwesenheiten, Banking-Sync + Zahlungsabgleich, DATEV-Export, Anrufprotokolle, Vertragsregister mit Kündigungs-Wächter | geplant |
@@ -233,7 +254,7 @@ steht in [docs/MASTERPLAN.md](docs/MASTERPLAN.md) §5.
 | `apps/runner` | `leitwerk-runner` — Node-20-CLI-Daemon (Pairing, Poll-Loop, Skills, Provider-Adapter) |
 | `packages/shared` | Zod-Schemas, Job-/Broker-Typen, Konstanten, Geld-Utils (Cent-Integer, de-DE) |
 | `packages/ui` | Design-System nach `docs/DESIGN.md` (Tokens Light/Dark, AiBadge, EmptyState, …) |
-| `supabase/` | 16 Migrationen + Edge Functions (Deno): `runner-broker`, `build-job-context`, Skeletons für P1/P3 |
+| `supabase/` | 20 Migrationen + Edge Functions (Deno): `runner-broker`, `build-job-context`, `oauth-gmail`, `mail-sync`, `send-mail`, `send-push`, `export-xrechnung` |
 | `migrations/` | **Verbindliche Datenmodell-Wahrheit** — Code folgt dem Schema, nicht umgekehrt |
 | `tools/mock-server` | Lokales Mock-Backend (ersetzt Supabase zum Testen) + Mock-Claude-CLI |
 | `tools/e2e-tutorial` | Playwright-Lauf: komplette User-Journey + annotierte Screenshots |

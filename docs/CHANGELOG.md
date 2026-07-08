@@ -1,5 +1,70 @@
 # Changelog
 
+## Etappe 3 — Finanzen: E-Rechnung, XRechnung, Mahnwesen (2026-07-08)
+
+Kompletter Phase-3-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `020_p3_finance.sql`):
+
+- **Eingangsrechnungs-Erfassung (Skill `extract_invoice`, hybrid):** Liegt der Mail ein
+  E-Rechnungs-XML bei (ZUGFeRD/Factur-X CII oder XRechnung UBL), liest der Runner es
+  **deterministisch ohne KI** (Konfidenz 1.0); sonst naive PDF-Text-Extraktion
+  (unkomprimierte Tj-Streams) bzw. Mail-Text → KI-Extraktion mit striktem Zod-Parsing.
+  Anhang-Download läuft über `mail-sync /download` (Org-Pfad-Check). Anwendung
+  serverseitig in `apply_job_result`: idempotent über `source_message_id`,
+  Firmen-Upsert nach Ausstellername, Dubletten-Markierung (gleiche Nummer + Brutto),
+  Ereignis `invoice_captured` durch die Regel-Engine.
+- **Prüf-Workflow Eingang:** erfasst → in Prüfung → freigegeben → bezahlt (+ abgelehnt),
+  `reviewed_by`/`approved_by`/`paid_at` protokolliert; „E-Rechnung“-Badge (violett)
+  zeigt Format + KI-/Direktparser-Herkunft, Dubletten werden rot markiert.
+- **Angebote & Ausgangsrechnungen:** gemeinsamer Beleg-Editor mit Positionsliste
+  (MoneyCell: rechtsbündig, tabular-nums, Cent-Rechnung); **Summen berechnet die DB**
+  (Trigger `recalc_invoice_totals`/`recalc_quote_totals` bei jeder Positionsänderung),
+  Nummern atomar aus `next_number()`. Status-Workflows (Entwurf → freigegeben →
+  versendet → bezahlt bzw. angenommen/abgelehnt), `quote_sent`/`quote_accepted`/
+  `invoice_paid` laufen durch die Regel-Engine; versendete Angebote bekommen
+  automatisch ein 7-Tage-Follow-up.
+- **XRechnung-Export (`export-xrechnung`):** deterministischer UBL-2.1-Builder
+  (`_shared/xrechnung.ts`, EN 16931 / CustomizationID xrechnung_3.0) mit cent-genauen
+  USt-Gruppen und Kleinunternehmer-Kategorie E; **B2G erzwingt die Leitweg-ID
+  serverseitig** (422 ohne `buyer_reference`); XML landet im Storage-Bucket `exports`
+  + `xml_storage_path` an der Rechnung. Nur JWT-Mitglieder, **Viewer abgelehnt**
+  (Rollenmatrix; das Finanzmodul ist für Viewer auch im UI unsichtbar).
+  Golden-File-Test in `packages/shared` (Builder ist Deno-frei importierbar).
+- **Mahnwesen (3 Stufen):** täglicher Cron `process_overdue_invoices` findet
+  überfällige Ausgangsrechnungen, legt `dunning_runs` als **Vorschläge** an
+  (Gebühren aus `org_profile.dunning_fees`, 7 Tage Abstand zwischen Stufen,
+  max. Stufe 3) und reiht `draft_dunning`-Jobs ein (KI-Mahntext). Versand NUR nach
+  Freigabe in der PWA — der Entwurf geht durch den geplanten Versand mit
+  30-Sekunden-Rückholen (Regel 4). Überspringen wird protokolliert.
+- **Finanz-Übersicht:** Kacheln „Offene Forderungen / Offene Eingangsrechnungen /
+  Angebots-Pipeline“ (cent-genau summiert), Tabs Eingang · Rechnungen · Angebote ·
+  Mahnwesen.
+- **Mock + E2E:** Mock spiegelt alle 020-Trigger (Summen-Trigger, Mahn-Cron,
+  `apply_job_result` v3, `export-xrechnung` inkl. B2G-Validierung); Demo-Mail #2
+  trägt jetzt ein CII-XML als Anhang, „Gmail verbinden“ seedet zusätzlich eine
+  10 Tage überfällige Ausgangsrechnung. E2E auf 36 Screenshots erweitert
+  (Eingang → Prüfen, Rechnungs-Editor → XRechnung-Export, Mahnstufe 1 →
+  Freigeben & senden). Fix im Mock: `mail-sync /download` verlangt wie die echte
+  Edge Function kein `accountId` mehr.
+
+### Manuelle Schritte für den Betreiber (Deploy Etappe 3)
+
+1. **Migration einspielen:** `supabase db push` (neu: `020_p3_finance.sql`).
+2. **Storage-Bucket anlegen** (einmalig, Dashboard → Storage oder SQL):
+   ```sql
+   insert into storage.buckets (id, name, public) values ('exports', 'exports', false)
+   on conflict (id) do nothing;
+   ```
+3. **Edge Functions deployen:**
+   `supabase functions deploy export-xrechnung mail-sync send-mail build-job-context`.
+4. **pg_cron-Job für das Mahnwesen** (SQL-Editor):
+   ```sql
+   select cron.schedule('overdue-invoices', '15 6 * * *',
+     $$select public.process_overdue_invoices()$$);
+   ```
+5. **PWA neu bauen/deployen:** `pnpm --filter @leitwerk/pwa build`.
+6. **Runner aktualisieren** (alle Nutzer): `npm update -g leitwerk-runner`
+   (neue Skills `extract_invoice`, `draft_dunning`).
+
 ## Etappe 2 — Aufgaben-Compiler, Wächter, Briefing (2026-07-08)
 
 Kompletter Phase-2-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `019_p2_tasks_watchdog.sql`):
