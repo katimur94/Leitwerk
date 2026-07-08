@@ -11,6 +11,36 @@ const b64url = (s) => Buffer.from(s, "utf8").toString("base64url");
 const now = () => new Date().toISOString();
 
 const DEMO_EMAIL = "demo@leitwerk.test";
+
+// ZUGFeRD-artiges CII-XML für die Demo-Rechnung (Etappe 3: extract_invoice
+// liest strukturierte E-Rechnungen deterministisch, ohne KI).
+const DEMO_INVOICE_XML = `<?xml version="1.0"?>
+<rsm:CrossIndustryInvoice xmlns:rsm="urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
+  xmlns:ram="urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100">
+  <rsm:ExchangedDocument>
+    <ram:ID>RE-88123</ram:ID>
+    <ram:IssueDateTime><udt:DateTimeString format="102" xmlns:udt="x">20260705</udt:DateTimeString></ram:IssueDateTime>
+  </rsm:ExchangedDocument>
+  <rsm:SupplyChainTradeTransaction>
+    <ram:ApplicableHeaderTradeAgreement>
+      <ram:SellerTradeParty><ram:Name>OfficeSupply GmbH</ram:Name></ram:SellerTradeParty>
+    </ram:ApplicableHeaderTradeAgreement>
+    <ram:ApplicableHeaderTradeSettlement>
+      <ram:PaymentReference>RE-88123</ram:PaymentReference>
+      <ram:InvoiceCurrencyCode>EUR</ram:InvoiceCurrencyCode>
+      <ram:PayeePartyCreditorFinancialAccount><ram:IBANID>DE02120300000000202051</ram:IBANID></ram:PayeePartyCreditorFinancialAccount>
+      <ram:SpecifiedTradePaymentTerms>
+        <ram:DueDateDateTime><udt:DateTimeString format="102" xmlns:udt="x">20260721</udt:DateTimeString></ram:DueDateDateTime>
+      </ram:SpecifiedTradePaymentTerms>
+      <ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+        <ram:LineTotalAmount>409.16</ram:LineTotalAmount>
+        <ram:TaxTotalAmount currencyID="EUR">77.74</ram:TaxTotalAmount>
+        <ram:GrandTotalAmount>486.90</ram:GrandTotalAmount>
+        <ram:DuePayableAmount>486.90</ram:DuePayableAmount>
+      </ram:SpecifiedTradeSettlementHeaderMonetarySummation>
+    </ram:ApplicableHeaderTradeSettlement>
+  </rsm:SupplyChainTradeTransaction>
+</rsm:CrossIndustryInvoice>`;
 const DEMO_MAILS = [
   {
     from: { name: "Anna Meier", email: "anna.meier@acme-bau.example" },
@@ -51,6 +81,9 @@ export function createMailHub({ db, persist }) {
     const ageMs = (index) => (index === 1 ? 3.2 * 86_400_000 : (3 - index * 0.4) * 60 * 60_000);
     db.mock_gmail[email] = {
       historyId: DEMO_MAILS.length + 1,
+      attachments: {
+        "att-invoice-xml": Buffer.from(DEMO_INVOICE_XML, "utf8").toString("base64"),
+      },
       messages: DEMO_MAILS.map((mail, index) => ({
         id: `mock-msg-${index + 1}`,
         threadId: `mock-thr-${index + 1}`,
@@ -58,14 +91,26 @@ export function createMailHub({ db, persist }) {
         internalDate: String(Date.now() - ageMs(index)),
         historySeq: index + 1,
         payload: {
-          mimeType: "text/plain",
+          mimeType: index === 1 ? "multipart/mixed" : "text/plain",
           headers: [
             { name: "From", value: `${mail.from.name} <${mail.from.email}>` },
             { name: "To", value: email },
             { name: "Subject", value: mail.subject },
             { name: "Message-ID", value: `<mock-${index + 1}@leitwerk.test>` },
           ],
-          body: { data: b64url(mail.body) },
+          // Mail 2 (Rechnung): Body-Part + E-Rechnungs-XML-Anhang
+          ...(index === 1
+            ? {
+                parts: [
+                  { mimeType: "text/plain", body: { data: b64url(mail.body) } },
+                  {
+                    mimeType: "application/xml",
+                    filename: "rechnung-RE-88123.xml",
+                    body: { attachmentId: "att-invoice-xml", size: DEMO_INVOICE_XML.length },
+                  },
+                ],
+              }
+            : { body: { data: b64url(mail.body) } }),
         },
       })),
     };
@@ -100,6 +145,12 @@ export function createMailHub({ db, persist }) {
     if (messageMatch) {
       const message = store.messages.find((m) => m.id === messageMatch[1]);
       return message ? [200, message] : [404, { error: "not found" }];
+    }
+    const attachmentMatch = path.match(/^\/messages\/[^/]+\/attachments\/([^/]+)$/);
+    if (attachmentMatch) {
+      const data = store.attachments?.[attachmentMatch[1]];
+      if (!data) return [404, { error: "attachment not found" }];
+      return [200, { data: Buffer.from(data, "base64").toString("base64url") }];
     }
     return [404, { error: `Mock-Gmail: ${path} nicht implementiert` }];
   }
@@ -141,6 +192,35 @@ export function createMailHub({ db, persist }) {
         });
         persist();
       }
+      // Etappe-3-Demo: eine überfällige Ausgangsrechnung fürs Mahnwesen
+      if (!db.invoices_out.some((i) => i.org_id === orgId)) {
+        const range = db.number_ranges.find((r) => r.org_id === orgId && r.kind === "invoice");
+        const number = `${range?.prefix ?? "RE-"}${String(range ? range.next_value++ : 90).padStart(range?.padding ?? 4, "0")}`;
+        let company = db.companies.find((c) => c.org_id === orgId && c.name === "ACME Bau GmbH");
+        if (!company) {
+          company = { id: randomUUID(), org_id: orgId, name: "ACME Bau GmbH", domain: null,
+            address: null, vat_id: null, phone: null, notes: null, created_at: now(), updated_at: now() };
+          db.companies.push(company);
+        }
+        const invoice = {
+          id: randomUUID(), org_id: orgId, case_id: null, company_id: company.id,
+          contact_id: null, quote_id: null, invoice_number: number, status: "sent",
+          invoice_date: new Date(Date.now() - 24 * 86_400_000).toISOString().slice(0, 10),
+          due_date: new Date(Date.now() - 10 * 86_400_000).toISOString().slice(0, 10),
+          net_amount: 1000, vat_amount: 190, gross_amount: 1190, currency: "EUR",
+          payment_terms: "14 Tage netto", buyer_reference: null,
+          pdf_storage_path: null, xml_storage_path: null,
+          sent_at: new Date(Date.now() - 24 * 86_400_000).toISOString(),
+          paid_amount: 0, paid_at: null, created_by: userId,
+          created_at: now(), updated_at: now(),
+        };
+        db.invoices_out.push(invoice);
+        db.invoice_items.push({
+          id: randomUUID(), invoice_id: invoice.id, position: 1,
+          description: "Elektroinstallation lt. Angebot", quantity: 1,
+          unit: "Pauschale", unit_price: 1000, vat_rate: 19, net_total: 1000,
+        });
+      }
       enqueueSyncJobs();
       return [302, null, { Location: `http://localhost:5173/einstellungen/postfaecher?connected=${DEMO_EMAIL}` }];
     }
@@ -150,6 +230,19 @@ export function createMailHub({ db, persist }) {
   // ---------- mail-sync (/token /ingest) ----------
   function handleMailSync(req, url, body, runner) {
     const action = url.pathname.split("/").filter(Boolean).pop();
+
+    // /download braucht KEIN Konto — nur den Org-Check über den Runner
+    // (wie die echte Edge Function mail-sync).
+    if (action === "download") {
+      const path = String(body.storagePath ?? "");
+      if (!path.startsWith(`org/${runner.org_id}/`)) {
+        return [403, { error: "Pfad gehört nicht zu dieser Organisation" }];
+      }
+      const data = (db.mock_storage ?? {})[path];
+      if (data === undefined) return [404, { error: "Datei nicht gefunden" }];
+      return [200, { data }];
+    }
+
     const account = db.mail_accounts.find(
       (a) => a.id === (body.accountId ?? url.searchParams.get("accountId")) && a.org_id === runner.org_id,
     );
@@ -218,6 +311,15 @@ export function createMailHub({ db, persist }) {
           created_at: now(),
         };
         db.mail_messages.push(message);
+        for (const attachment of m.attachments ?? []) {
+          db.mail_attachments.push({
+            id: randomUUID(), org_id: account.org_id, message_id: message.id,
+            filename: attachment.filename, mime_type: attachment.mime_type ?? null,
+            size_bytes: attachment.size_bytes ?? null,
+            storage_path: attachment.storage_path ?? null,
+            document_id: null, ai_kind: null, created_at: now(),
+          });
+        }
         inserted += 1;
         onMailMessageInserted(message, thread);
       }
@@ -233,7 +335,11 @@ export function createMailHub({ db, persist }) {
     }
 
     if (action === "attachment") {
-      return [200, { storagePath: `org/${account.org_id}/mock/${randomUUID()}` }];
+      const path = `org/${account.org_id}/mock/${randomUUID()}/${url.searchParams.get("filename") ?? "anhang"}`;
+      db.mock_storage = db.mock_storage ?? {};
+      db.mock_storage[path] = (body && body.__rawBase64) || "";
+      persist();
+      return [200, { storagePath: path }];
     }
     return [404, { error: `mail-sync: ${action} unbekannt` }];
   }
@@ -460,6 +566,15 @@ export function createMailHub({ db, persist }) {
       thread.updated_at = now();
       pushAutomationRun(job.org_id, "auto_label_mail", job, thread.id,
         `Kategorie: ${result.category ?? "—"}`, "executed", result.confidence ?? 0, result);
+      // Etappe 3: Rechnungs-Mail mit Anhang → Rechnungs-Erfassung
+      const message = db.mail_messages.find((m) => m.id === job.payload?.message_id);
+      if (
+        result.category === "rechnung" && message?.has_attachments &&
+        db.automations.some((a) => a.org_id === job.org_id && a.key === "auto_capture_invoice" && a.is_enabled !== false) &&
+        !db.agent_jobs.some((j) => j.job_type === "extract_invoice" && j.payload?.message_id === message.id)
+      ) {
+        pushJob(job.org_id, "extract_invoice", { message_id: message.id, thread_id: message.thread_id }, 6);
+      }
     } else if (job.job_type === "case_match") {
       const thread = db.mail_threads.find((t) => t.id === job.payload?.thread_id);
       if (!thread || thread.case_id) return;
@@ -571,6 +686,68 @@ export function createMailHub({ db, persist }) {
             entity_id: null, read_at: null, pushed_at: null, created_at: now(),
           });
         }
+      }
+    } else if (job.job_type === "extract_invoice") {
+      if (result.found !== true) { persist(); return; }
+      const message = db.mail_messages.find((m) => m.id === job.payload?.message_id);
+      if (!message || db.invoices_in.some(
+        (i) => i.org_id === job.org_id && i.extraction?.source_message_id === message.id,
+      )) { persist(); return; }
+      let companyId = null;
+      if (result.issuer_name) {
+        let company = db.companies.find(
+          (c) => c.org_id === job.org_id && c.name.toLowerCase() === result.issuer_name.toLowerCase(),
+        );
+        if (!company) {
+          company = { id: randomUUID(), org_id: job.org_id, name: result.issuer_name,
+            domain: null, address: null, vat_id: null, phone: null, notes: null,
+            created_at: now(), updated_at: now() };
+          db.companies.push(company);
+        }
+        companyId = company.id;
+      }
+      const duplicate = db.invoices_in.find(
+        (i) => i.org_id === job.org_id && i.invoice_number === result.invoice_number &&
+          i.gross_amount === result.gross_amount,
+      );
+      const thread = db.mail_threads.find((t) => t.id === message.thread_id);
+      db.invoices_in.push({
+        id: randomUUID(), org_id: job.org_id, case_id: thread?.case_id ?? null,
+        company_id: companyId, source: "mail",
+        attachment_id: db.mail_attachments.find((a) => a.message_id === message.id)?.id ?? null,
+        document_id: null, status: "captured",
+        invoice_number: result.invoice_number ?? null,
+        invoice_date: result.invoice_date ?? null, due_date: result.due_date ?? null,
+        net_amount: result.net_amount ?? null, vat_amount: result.vat_amount ?? null,
+        gross_amount: result.gross_amount ?? null,
+        currency: result.currency ?? "EUR", iban: result.iban ?? null,
+        payment_reference: result.payment_reference ?? null,
+        extraction: { ...result, source_message_id: message.id },
+        extraction_confidence: result.confidence ?? null,
+        format_detected: result.format_detected ?? null,
+        is_einvoice: result.is_einvoice ?? false,
+        duplicate_of: duplicate?.id ?? null, reviewed_by: null, approved_by: null,
+        paid_at: null, created_at: now(), updated_at: now(),
+      });
+      evaluateRules(job.org_id, "invoice_captured", {
+        entity_type: "invoice_in", entity_id: db.invoices_in.at(-1).id,
+        invoice_number: result.invoice_number, gross_amount: result.gross_amount,
+        issuer: result.issuer_name, is_duplicate: !!duplicate,
+      });
+    } else if (job.job_type === "draft_dunning") {
+      const dunning = db.dunning_runs.find(
+        (d) => d.invoice_id === job.payload?.invoice_id && d.level === job.payload?.level,
+      );
+      const account = db.mail_accounts.find((a) => a.org_id === job.org_id);
+      if (dunning && account) {
+        db.mail_drafts.push({
+          id: randomUUID(), org_id: job.org_id, account_id: account.id, thread_id: null,
+          created_by: null, source: "automation", job_id: job.id,
+          to_addrs: [], cc_addrs: [], subject: result.subject ?? null,
+          body_html: result.body_html ?? null, attachments: [], status: "draft",
+          send_after: null, sent_message_id: null, created_at: now(), updated_at: now(),
+        });
+        dunning.draft_id = db.mail_drafts.at(-1).id;
       }
     } else if (job.job_type === "followup_check") {
       for (const item of result.followups ?? []) {
@@ -768,6 +945,44 @@ export function createMailHub({ db, persist }) {
           ].slice(0, 12),
         };
       }
+      case "extract_invoice": {
+        if (!message) return null;
+        return {
+          jobId: job.id, jobType: "extract_invoice", locale: "de-DE",
+          today: now().slice(0, 10),
+          message: {
+            subject: message.subject ?? "", from: message.from_addr,
+            body_excerpt: (message.body_text ?? "").slice(0, 6000),
+          },
+          attachments: db.mail_attachments
+            .filter((a) => a.message_id === message.id)
+            .map((a) => ({
+              id: a.id, filename: a.filename, mime_type: a.mime_type,
+              storage_path: a.storage_path,
+            })),
+        };
+      }
+      case "draft_dunning": {
+        const invoice = db.invoices_out.find((i) => i.id === job.payload?.invoice_id);
+        if (!invoice) return null;
+        const profile = db.org_profile.find((p) => p.org_id === job.org_id);
+        const company = db.companies.find((c) => c.id === invoice.company_id);
+        const level = Number(job.payload?.level ?? 1);
+        return {
+          jobId: job.id, jobType: "draft_dunning", locale: "de-DE",
+          level, fee: Number(profile?.dunning_fees?.[String(level)] ?? 0),
+          invoice: {
+            invoice_number: invoice.invoice_number,
+            invoice_date: invoice.invoice_date, due_date: invoice.due_date,
+            gross_amount: invoice.gross_amount, currency: invoice.currency,
+            recipient_name: company?.name ?? "",
+          },
+          org: {
+            legal_name: profile?.legal_name ?? "",
+            iban: profile?.iban ?? null, bank_name: profile?.bank_name ?? null,
+          },
+        };
+      }
       case "followup_check": {
         return {
           jobId: job.id, jobType: "followup_check", locale: "de-DE",
@@ -845,6 +1060,15 @@ export function createMailHub({ db, persist }) {
       assignThreadToCase(body.p_thread, body.p_case, body.p_linked_by ?? "user", body.p_confidence ?? null);
       return [204, null];
     }
+    if (fn === "next_number") {
+      const range = db.number_ranges.find(
+        (r) => r.org_id === body.p_org && r.kind === body.p_kind,
+      );
+      if (!range) return [400, { message: `Kein Nummernkreis für ${body.p_kind}` }];
+      const value = range.next_value++;
+      persist();
+      return [200, `${range.prefix}${String(value).padStart(range.padding ?? 4, "0")}`];
+    }
     if (fn === "record_automation_outcome") {
       const run = db.automation_runs.find((r) => r.id === body.p_run_id);
       if (!run) return [400, { message: "automation_run nicht gefunden" }];
@@ -914,8 +1138,64 @@ export function createMailHub({ db, persist }) {
         );
         if (!recent) pushJob(org.id, jobType, { scope: "org" }, priority);
       }
+
+      // Etappe 3: Mahnvorschläge für überfällige Rechnungen (Spiegel von
+      // process_overdue_invoices aus Migration 020)
+      if (db.automations.some(
+        (a) => a.org_id === org.id && a.key === "auto_dunning" && a.is_enabled !== false,
+      )) {
+        const today = now().slice(0, 10);
+        for (const invoice of db.invoices_out.filter(
+          (i) => i.org_id === org.id && ["sent", "overdue", "partially_paid"].includes(i.status) &&
+            i.due_date && i.due_date < today,
+        )) {
+          if (invoice.status === "sent") invoice.status = "overdue";
+          const level = Math.max(0, ...db.dunning_runs
+            .filter((d) => d.invoice_id === invoice.id && ["approved", "sent"].includes(d.status))
+            .map((d) => d.level)) + 1;
+          if (level > 3) continue;
+          if (db.dunning_runs.some((d) => d.invoice_id === invoice.id &&
+            (d.status === "proposed" || d.level >= level))) continue;
+          const profile = db.org_profile.find((p) => p.org_id === org.id);
+          db.dunning_runs.push({
+            id: randomUUID(), org_id: org.id, invoice_id: invoice.id, level,
+            draft_id: null, fee: Number(profile?.dunning_fees?.[String(level)] ?? 0),
+            status: "proposed", proposed_by: "ai", sent_at: null, created_at: now(),
+          });
+          pushJob(org.id, "draft_dunning", { invoice_id: invoice.id, level }, 7);
+          for (const member of db.org_members.filter((m) => m.org_id === org.id && m.is_active)) {
+            db.notifications.push({
+              id: randomUUID(), org_id: org.id, user_id: member.user_id,
+              kind: "dunning_proposed",
+              title: `Mahnvorschlag: Rechnung ${invoice.invoice_number} (Stufe ${level})`,
+              body: null, entity_type: "invoice_out", entity_id: invoice.id,
+              read_at: null, pushed_at: null, created_at: now(),
+            });
+          }
+        }
+      }
     }
     persist();
+  }
+
+  // ---------- export-xrechnung (vereinfachtes Mock-XML) ----------
+  function handleExportXrechnung(_req, _url, body, user) {
+    if (!user) return [401, { error: "Nicht angemeldet" }];
+    const invoice = db.invoices_out.find((i) => i.id === body.invoiceId);
+    if (!invoice) return [404, { error: "Rechnung nicht gefunden" }];
+    if (body.isB2G === true && !invoice.buyer_reference) {
+      return [422, {
+        error: "Für Rechnungen an öffentliche Auftraggeber (B2G) ist die Leitweg-ID (Käuferreferenz) Pflicht.",
+        code: "buyer_reference_required",
+      }];
+    }
+    const items = db.invoice_items.filter((i) => i.invoice_id === invoice.id);
+    if (items.length === 0) return [422, { error: "Rechnung hat keine Positionen" }];
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<!-- Mock-XRechnung (lokale Demo) -->\n<Invoice><ID>${invoice.invoice_number}</ID><PayableAmount currencyID="EUR">${invoice.gross_amount.toFixed(2)}</PayableAmount></Invoice>\n`;
+    const path = `org/${invoice.org_id}/xrechnung/${invoice.invoice_number}.xml`;
+    invoice.xml_storage_path = path;
+    persist();
+    return [200, { ok: true, xmlStoragePath: path, xml }];
   }
 
   return {
@@ -923,6 +1203,7 @@ export function createMailHub({ db, persist }) {
     handleOauthGmail,
     handleMailSync,
     handleSendMail,
+    handleExportXrechnung,
     buildContext,
     applyJobResult,
     rpc,

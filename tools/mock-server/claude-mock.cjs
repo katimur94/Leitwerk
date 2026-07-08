@@ -184,6 +184,41 @@ function answerFor(prompt) {
     };
   }
 
+  // extract_invoice (KI-Fallback, wenn kein E-Rechnungs-XML vorliegt)
+  if (prompt.includes("Extrahiere die Rechnungsdaten")) {
+    const number = (prompt.match(/RE-\d+/) || [])[0];
+    const amount = (prompt.match(/(\d+[.,]\d{2})\s*EUR/) || [])[1];
+    if (!number && !amount) return { found: false };
+    return {
+      found: true,
+      invoice_number: number || "UNBEKANNT",
+      invoice_date: null,
+      due_date: null,
+      net_amount: null,
+      vat_amount: null,
+      gross_amount: amount ? Number(amount.replace(",", ".")) : null,
+      currency: "EUR",
+      iban: null,
+      payment_reference: number || null,
+      issuer_name: (prompt.match(/Absender: \S+@(\S+?)\./) || [])[1] || "Unbekannt",
+      confidence: 0.8,
+    };
+  }
+
+  // draft_dunning
+  if (prompt.includes("Zahlungserinnerung") || prompt.includes("Mahnung")) {
+    const number = (prompt.match(/Rechnung: (\S+)/) || [])[1] || "—";
+    const amount = (prompt.match(/Offener Betrag: ([\d.,]+ EUR)/) || [])[1] || "";
+    return {
+      subject: `Zahlungserinnerung zu Rechnung ${number}`,
+      body_html:
+        `<p>Sehr geehrte Damen und Herren,</p><p>zu unserer Rechnung ${number} ` +
+        `(offener Betrag: ${amount}) konnten wir noch keinen Zahlungseingang feststellen. ` +
+        `Sicher ist das nur untergegangen — wir bitten um Ausgleich innerhalb von 7 Tagen.</p>` +
+        `<p>Mit freundlichen Grüßen</p>`,
+    };
+  }
+
   // thread_summary
   if (prompt.includes("Fasse den folgenden E-Mail-Thread")) {
     return {

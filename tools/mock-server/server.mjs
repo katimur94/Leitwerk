@@ -58,6 +58,13 @@ const emptyDb = () => ({
   briefings: [],
   push_subscriptions: [],
   snoozes: [],
+  // Etappe 3: Finanzen
+  invoices_in: [],
+  invoices_out: [],
+  invoice_items: [],
+  quotes: [],
+  quote_items: [],
+  dunning_runs: [],
 });
 
 // Rate-Limit auf /pair (Migration 017) — Fenster pro Minute, im Speicher.
@@ -249,6 +256,31 @@ const tableDefaults = {
     user_agent: null,
     created_at: now(),
   }),
+  invoices_out: () => ({
+    id: randomUUID(),
+    case_id: null, company_id: null, contact_id: null, quote_id: null,
+    status: "draft", invoice_date: now().slice(0, 10), due_date: null,
+    net_amount: 0, vat_amount: 0, gross_amount: 0, currency: "EUR",
+    payment_terms: null, buyer_reference: null, pdf_storage_path: null,
+    xml_storage_path: null, sent_at: null, paid_amount: 0, paid_at: null,
+    created_by: null, created_at: now(), updated_at: now(),
+  }),
+  quotes: () => ({
+    id: randomUUID(),
+    case_id: null, company_id: null, contact_id: null,
+    status: "draft", quote_date: now().slice(0, 10), valid_until: null,
+    net_amount: 0, vat_amount: 0, gross_amount: 0, pdf_storage_path: null,
+    sent_at: null, decided_at: null, created_by: null,
+    created_at: now(), updated_at: now(),
+  }),
+  invoice_items: () => ({
+    id: randomUUID(), position: 0, description: "Position", quantity: 1,
+    unit: "Stk", unit_price: 0, vat_rate: 19, net_total: 0,
+  }),
+  quote_items: () => ({
+    id: randomUUID(), position: 0, description: "Position", quantity: 1,
+    unit: "Stk", unit_price: 0, vat_rate: 19, net_total: 0,
+  }),
   agent_jobs: () => ({
     id: randomUUID(),
     created_by: null,
@@ -272,6 +304,35 @@ const tableDefaults = {
 };
 
 const insertTriggers = { orgs: onOrgCreated };
+
+/** Positions-Summen wie die Trigger aus Migration 020. */
+function recalcDocTotals(itemsTable) {
+  const parentTable = itemsTable === "invoice_items" ? "invoices_out" : "quotes";
+  const fk = itemsTable === "invoice_items" ? "invoice_id" : "quote_id";
+  return (row) => {
+    const parent = db[parentTable].find((p) => p.id === row[fk]);
+    if (!parent) return;
+    const items = db[itemsTable].filter((i) => i[fk] === parent.id);
+    for (const item of items) {
+      item.net_total = Math.round(item.quantity * item.unit_price * 100) / 100;
+    }
+    const net = items.reduce((sum, i) => sum + i.net_total, 0);
+    const vat = items.reduce(
+      (sum, i) => sum + Math.round(i.net_total * i.vat_rate) / 100,
+      0,
+    );
+    parent.net_amount = Math.round(net * 100) / 100;
+    parent.vat_amount = Math.round(vat * 100) / 100;
+    parent.gross_amount = Math.round((net + vat) * 100) / 100;
+    parent.updated_at = now();
+  };
+}
+
+// Nach JEDEM Schreibzugriff auf diese Tabellen ausgeführt (POST/PATCH/DELETE)
+const writeTriggers = {
+  invoice_items: recalcDocTotals("invoice_items"),
+  quote_items: recalcDocTotals("quote_items"),
+};
 
 // ---------- Auth (GoTrue-Subset) ----------
 
@@ -499,10 +560,26 @@ function applySelect(table, rows, url) {
       orgs: db.orgs.find((o) => o.id === row.org_id) ?? null,
     }));
   }
-  if (table === "cases" && select.includes("companies(")) {
+  if (["cases", "invoices_in", "invoices_out", "quotes"].includes(table) && select.includes("companies(")) {
     return rows.map((row) => {
       const company = db.companies.find((c) => c.id === row.company_id);
       return { ...row, companies: company ? { name: company.name } : null };
+    });
+  }
+  if (table === "dunning_runs" && select.includes("invoices_out(")) {
+    return rows.map((row) => {
+      const invoice = db.invoices_out.find((i) => i.id === row.invoice_id);
+      return {
+        ...row,
+        invoices_out: invoice
+          ? {
+              invoice_number: invoice.invoice_number,
+              gross_amount: invoice.gross_amount,
+              currency: invoice.currency,
+              due_date: invoice.due_date,
+            }
+          : null,
+      };
     });
   }
   if (table === "automation_runs" && select.includes("automations")) {
@@ -551,6 +628,7 @@ function handleRest(req, url, body) {
       const row = { ...(tableDefaults[table]?.() ?? { id: randomUUID(), created_at: now() }), ...item };
       db[table].push(row);
       insertTriggers[table]?.(row);
+      writeTriggers[table]?.(row);
       return row;
     });
     persist();
@@ -562,7 +640,11 @@ function handleRest(req, url, body) {
 
   if (req.method === "PATCH") {
     const rows = applyFilters(db[table], filters);
-    for (const row of rows) Object.assign(row, body, { updated_at: now() });
+    for (const row of rows) {
+      Object.assign(row, body, { updated_at: now() });
+      writeTriggers[table]?.(row);
+      mailHub.onRowPatched?.(table, row);
+    }
     persist();
     const returning = (req.headers.prefer ?? "").includes("return=representation");
     if (!returning) return [204, null];
@@ -572,6 +654,7 @@ function handleRest(req, url, body) {
   if (req.method === "DELETE") {
     const rows = applyFilters(db[table], filters);
     db[table] = db[table].filter((row) => !rows.includes(row));
+    for (const row of rows) writeTriggers[table]?.(row);
     persist();
     return [204, null];
   }
@@ -586,7 +669,7 @@ function handleRpc(req, url, body) {
   const user = userFromAuthHeader(req);
   if (!user) return [401, { message: "invalid token" }];
 
-  // Etappe-1-RPCs (create_case, assign_thread_to_case, record_automation_outcome)
+  // Etappen-RPCs (create_case, assign_thread_to_case, record_automation_outcome, next_number)
   const mailRpc = mailHub.rpc(fn, body, user);
   if (mailRpc) return mailRpc;
 
@@ -934,11 +1017,12 @@ const server = http.createServer(async (req, res) => {
   if (["POST", "PATCH", "PUT"].includes(req.method)) {
     const chunks = [];
     for await (const chunk of req) chunks.push(chunk);
-    const raw = Buffer.concat(chunks).toString();
+    const raw = Buffer.concat(chunks);
     try {
-      body = raw ? JSON.parse(raw) : {};
+      body = raw.length ? JSON.parse(raw.toString()) : {};
     } catch {
-      body = {};
+      // Binär-Uploads (z. B. mail-sync /attachment) als Base64 durchreichen
+      body = { __rawBase64: raw.toString("base64") };
     }
   }
 
@@ -970,6 +1054,8 @@ const server = http.createServer(async (req, res) => {
       }
     } else if (url.pathname.startsWith("/functions/v1/send-mail")) {
       [status, payload] = mailHub.handleSendMail(req, url, body, userFromAuthHeader(req));
+    } else if (url.pathname.startsWith("/functions/v1/export-xrechnung")) {
+      [status, payload] = mailHub.handleExportXrechnung(req, url, body, userFromAuthHeader(req));
     } else if (url.pathname.startsWith("/gmail/v1/users/me")) {
       [status, payload] = mailHub.handleGmailApi(req, url);
     } else if (url.pathname.startsWith("/storage/v1/object/")) {

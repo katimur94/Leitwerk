@@ -322,12 +322,12 @@ try {
     { at: 'nav button[title="Design wechseln"]', label: "Hell/Dunkel umschalten" },
   ]);
 
-  // ---- 12 Modul-Platzhalter (Finanzen, Phase 3) ----
+  // ---- 12 Finanzen leer (Empty-States vor dem ersten Postfach) ----
   await page.click('nav [title="Finanzen"]');
-  await page.waitForSelector('main :text("Phase 3")');
-  await capture("modul-platzhalter", [
-    { at: 'nav [title="Finanzen"]', label: "Module sind angelegt …" },
-    { at: "main p", label: "… und zeigen ehrlich ihre Phase (kein leerer Screen)" },
+  await page.waitForSelector('main p:has-text("offen")');
+  await capture("finanzen-leer", [
+    { at: 'nav [title="Finanzen"]', label: "Finanzen-Modul (Phase 3)" },
+    { at: "main h1", label: "Noch keine Daten — Kacheln stehen auf 0,00 € (ehrlicher Empty-State)" },
   ]);
 
   // ---- 13 CommandBar (Cmd/Strg+K) ----
@@ -556,7 +556,60 @@ try {
     { at: 'button:has-text("Wartet")', label: "Status: offen · wartet · erledigt · archiviert" },
   ]);
 
-  // ---- 31 Regel-Builder (Etappe 0.5) ----
+  // ---- 31 Finanzen: Eingangsrechnung (extract_invoice) ----
+  await page.goto(`${BASE}/finanzen`);
+  await page.waitForSelector('button:has-text("Eingang")');
+  await page.click('button:has-text("Eingang")');
+  await waitFor(async () => {
+    await sleep(1500);
+    return (await page.locator('main :text("RE-88123")').count()) > 0;
+  }, 90_000, "Erfasste Eingangsrechnung (extract_invoice)");
+  await capture("finanzen-eingang", [
+    { at: 'p:has-text("RE-88123")', label: "Aus dem Mail-Anhang erfasst — E-Rechnungs-XML ohne KI gelesen" },
+    { at: 'span:has-text("E-Rechnung")', label: "ZUGFeRD/XRechnung erkannt (Konfidenz 100 %)" },
+    { at: 'button:has-text("Prüfen")', label: "Prüf-Workflow: erfasst → geprüft → freigegeben → bezahlt", side: "left" },
+  ]);
+  await page.click('button:has-text("Prüfen")');
+
+  // ---- 32 Rechnungs-Editor + XRechnung-Export ----
+  await page.click('button:has-text("Rechnungen")');
+  await page.waitForSelector('button:has-text("Neue Rechnung")');
+  await page.click('button:has-text("Neue Rechnung")');
+  await page.waitForSelector('button:has-text("Position hinzufügen")');
+  await page.click('button:has-text("Position hinzufügen")');
+  await sleep(800);
+  const descInput = page.locator("table tbody tr").last().locator("input").first();
+  await descInput.fill("Wartungsvertrag Q3 — Pauschale");
+  await descInput.blur();
+  const priceInput = page.locator("table tbody tr").last().locator("input").nth(3);
+  await priceInput.fill("450,00");
+  await priceInput.blur();
+  await sleep(800);
+  await page.click('button:has-text("XRechnung-XML")');
+  await page.waitForSelector(':text("XML exportiert ✓")');
+  await capture("rechnung-editor", [
+    { at: "table", label: "Positionsliste — MoneyCell: rechtsbündig, tabular-nums" },
+    { at: 'button:has-text("XRechnung-XML")', label: "EN 16931 / XRechnung 3.0 — deterministisch, Golden-File-getestet", side: "left" },
+    { at: ':text("XML exportiert ✓")', label: "XML im Export-Bucket + an der Rechnung" },
+    { at: 'label:has-text("B2G")', label: "B2G: Leitweg-ID wird serverseitig erzwungen", side: "left" },
+  ]);
+  await page.click('main button:has-text("Schließen")');
+
+  // ---- 33 Mahnwesen mit KI-Entwurf ----
+  await page.click('button:has-text("Mahnwesen")');
+  await waitFor(async () => {
+    await sleep(2000);
+    return (await page.locator('span:has-text("Mahnstufe 1")').count()) > 0;
+  }, 120_000, "Mahnvorschlag (überfällige Demo-Rechnung)");
+  await capture("mahnwesen", [
+    { at: 'span:has-text("Mahnstufe 1")', label: "Violett = KI-Vorschlag mit Mahnentwurf" },
+    { at: 'button:has-text("Freigeben & senden")', label: "Versand NUR nach Freigabe (30s-Rückholen inklusive)", side: "left" },
+    { at: 'button:has-text("Überspringen")', label: "Überspringen ist immer eine Option", side: "left" },
+  ]);
+  await page.click('button:has-text("Freigeben & senden")');
+  await sleep(1000);
+
+  // ---- 34 Regel-Builder (Etappe 0.5) ----
   await page.goto(`${BASE}/einstellungen/regeln`);
   await page.waitForSelector('h3:has-text("Neue Regel")');
   await page.fill("#rule-name", "Rechnungen sofort melden");
@@ -577,7 +630,7 @@ try {
     { at: 'li:has-text("Rechnungen sofort melden")', label: "Regel aktiv — pausieren oder löschen jederzeit" },
   ]);
 
-  // ---- 33 Dark Mode ----
+  // ---- 36 Dark Mode ----
   await page.click('nav button[title="Design wechseln"]');
   await sleep(400);
   await capture("dark-mode", [
