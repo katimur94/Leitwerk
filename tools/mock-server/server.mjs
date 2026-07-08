@@ -35,7 +35,14 @@ const emptyDb = () => ({
   agent_job_events: [],
   audit_log: [],
   notifications: [],
+  org_rules: [],
+  tasks: [],
 });
+
+// Rate-Limit auf /pair (Migration 017) — Fenster pro Minute, im Speicher.
+const pairingAttempts = new Map(); // key: `${ip}|${minute}` → count
+const MAX_PAIRING_ATTEMPTS_PER_MINUTE = 10;
+const MAX_PAIRING_CODE_FAILURES = 5;
 
 let db = emptyDb();
 if (existsSync(DB_PATH)) {
@@ -174,7 +181,17 @@ const tableDefaults = {
     expires_at: new Date(Date.now() + 10 * 60_000).toISOString(),
     claimed_at: null,
     runner_id: null,
+    failed_attempts: 0,
     created_at: now(),
+  }),
+  org_rules: () => ({
+    id: randomUUID(),
+    is_enabled: true,
+    conditions: [],
+    action: {},
+    created_by: null,
+    created_at: now(),
+    updated_at: now(),
   }),
   agent_jobs: () => ({
     id: randomUUID(),
@@ -450,25 +467,124 @@ function handleRest(req, url, body) {
     return [200, wantsSingleObject(req) ? rows[0] : rows];
   }
 
+  if (req.method === "DELETE") {
+    const rows = applyFilters(db[table], filters);
+    db[table] = db[table].filter((row) => !rows.includes(row));
+    persist();
+    return [204, null];
+  }
+
   return [405, { message: "Methode nicht unterstützt" }];
+}
+
+// ---------- RPCs für die PWA (Migration 017) ----------
+
+function handleRpc(req, url, body) {
+  const fn = url.pathname.replace(/^\/rest\/v1\/rpc\//, "");
+  const user = userFromAuthHeader(req);
+  if (!user) return [401, { message: "invalid token" }];
+
+  if (fn === "approve_runner" || fn === "reject_runner") {
+    const runner = db.runners.find((r) => r.id === body.p_runner_id);
+    if (!runner) return [400, { message: "Runner nicht gefunden" }];
+    const member = db.org_members.find(
+      (m) => m.org_id === runner.org_id && m.user_id === user.id && m.is_active,
+    );
+    if (!member || !["owner", "admin"].includes(member.role)) {
+      return [403, { message: "Keine Berechtigung (Owner/Admin erforderlich)" }];
+    }
+    if (fn === "approve_runner") {
+      if (runner.status !== "pending_approval") {
+        return [400, { message: "Runner nicht freigabebedürftig" }];
+      }
+      Object.assign(runner, {
+        status: "online",
+        approved_by: user.id,
+        approved_at: now(),
+        updated_at: now(),
+      });
+    } else {
+      Object.assign(runner, { status: "disabled", updated_at: now() });
+    }
+    db.audit_log.push({
+      id: db.audit_log.length + 1,
+      org_id: runner.org_id,
+      actor_type: "user",
+      actor_id: user.id,
+      action: fn === "approve_runner" ? "runner.approved" : "runner.rejected",
+      entity_type: "runner",
+      entity_id: runner.id,
+      detail: {},
+      created_at: now(),
+    });
+    persist();
+    return [204, null];
+  }
+
+  return [404, { message: `RPC ${fn} nicht implementiert` }];
 }
 
 // ---------- Job-Queue-RPCs (Portierung aus 009_rls_functions.sql) ----------
 
+/** Nachtfenster prüfen (Spiegel von claim_next_job, Migration 017). */
+function isInQuietHours(quietHours) {
+  if (!quietHours?.start || !quietHours?.end) return null;
+  const local = new Date().toLocaleTimeString("de-DE", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: quietHours.timezone ?? "Europe/Berlin",
+  });
+  const { start, end } = quietHours;
+  return start <= end ? local >= start && local < end : local >= start || local < end;
+}
+
 function claimNextJob(runnerId) {
-  const runner = db.runners.find((r) => r.id === runnerId && r.status !== "disabled");
-  if (!runner) throw new Error("Runner unbekannt oder deaktiviert");
+  const runner = db.runners.find((r) => r.id === runnerId);
+  if (!runner || ["disabled", "pending_approval"].includes(runner.status)) {
+    throw new Error("Runner unbekannt, deaktiviert oder wartet auf Freigabe");
+  }
+  // Heartbeat in der RPC (ein Roundtrip, Migration 017)
+  Object.assign(runner, { last_heartbeat: now(), status: "online" });
+
+  // Abo-Schutz: rollierende Fenster über die claimed-Ereignisse
+  const hourAgo = new Date(Date.now() - 60 * 60_000).toISOString();
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+  const claims = db.agent_job_events.filter(
+    (e) => e.event === "claimed" && e.runner_id === runnerId,
+  );
+  if (claims.filter((e) => e.created_at > hourAgo).length >= runner.max_jobs_per_hour) {
+    persist();
+    return null;
+  }
+  if (claims.filter((e) => e.created_at > dayAgo).length >= runner.daily_job_limit) {
+    persist();
+    return null;
+  }
+
+  const inWindow = isInQuietHours(runner.quiet_hours);
+  const priorityAllowed = (p) => {
+    if (p <= 2) return true; // interaktiv: immer
+    if (inWindow === null) return true; // kein Fenster konfiguriert
+    if (p >= 8) return inWindow; // Nacht-Batch nur im Fenster
+    return !inWindow; // Normal/Sync nur außerhalb
+  };
+
   const candidates = db.agent_jobs
     .filter(
       (j) =>
         j.org_id === runner.org_id &&
         j.status === "queued" &&
         j.run_after <= now() &&
-        j.attempts < j.max_attempts,
+        j.attempts < j.max_attempts &&
+        priorityAllowed(j.priority),
     )
     .sort((a, b) => a.priority - b.priority || (a.created_at > b.created_at ? 1 : -1));
   const job = candidates[0];
-  if (!job) return null;
+  if (!job) {
+    persist();
+    return null;
+  }
   Object.assign(job, {
     status: "claimed",
     claimed_by: runnerId,
@@ -477,7 +593,7 @@ function claimNextJob(runnerId) {
     attempts: job.attempts + 1,
     updated_at: now(),
   });
-  db.agent_job_events.push({ id: db.agent_job_events.length + 1, job_id: job.id, event: "claimed", detail: { runner: runnerId }, created_at: now() });
+  db.agent_job_events.push({ id: db.agent_job_events.length + 1, job_id: job.id, event: "claimed", runner_id: runnerId, detail: { runner: runnerId }, created_at: now() });
   persist();
   return job;
 }
@@ -488,7 +604,9 @@ function jobHeartbeat(runnerId, jobId) {
   );
   if (job) Object.assign(job, { heartbeat_at: now(), status: "running", updated_at: now() });
   const runner = db.runners.find((r) => r.id === runnerId);
-  if (runner) Object.assign(runner, { last_heartbeat: now(), status: "online" });
+  if (runner && ["online", "offline"].includes(runner.status)) {
+    Object.assign(runner, { last_heartbeat: now(), status: "online" });
+  }
   persist();
 }
 
@@ -522,13 +640,21 @@ function failJob(runnerId, jobId, errorMessage) {
 
 // ---------- Edge Functions: runner-broker + build-job-context ----------
 
+/** Reine Token-Prüfung — Status-Gates macht handleBroker (wie runner-auth.ts). */
 function verifyRunner(req) {
   const runnerId = req.headers["x-runner-id"];
   const token = req.headers["x-runner-token"];
   if (!runnerId || !token) return null;
   const runner = db.runners.find((r) => r.id === runnerId);
-  if (!runner || runner.status === "disabled") return null;
+  if (!runner) return null;
   if (sha256(`${PEPPER}:${token}`) !== runner.token_hash) return null;
+  return runner;
+}
+
+/** Für build-job-context: nur aktive Runner (pending/disabled abgelehnt). */
+function verifyActiveRunner(req) {
+  const runner = verifyRunner(req);
+  if (!runner || ["disabled", "pending_approval"].includes(runner.status)) return null;
   return runner;
 }
 
@@ -538,12 +664,29 @@ function handleBroker(req, url, body) {
   if (req.method !== "POST") return [405, { error: "Nur POST" }];
 
   if (action === "pair") {
+    // Rate-Limit: 10 Versuche pro IP pro Minute (Migration 017)
+    const ip = req.socket?.remoteAddress ?? "unknown";
+    const windowKey = `${ip}|${new Date().toISOString().slice(0, 16)}`;
+    const attempts = (pairingAttempts.get(windowKey) ?? 0) + 1;
+    pairingAttempts.set(windowKey, attempts);
+    if (attempts > MAX_PAIRING_ATTEMPTS_PER_MINUTE) {
+      return [429, { error: "Zu viele Pairing-Versuche. Warte eine Minute.", code: "rate_limited" }];
+    }
+
     const code = String(body.code ?? "").trim().toUpperCase();
-    const pairing = db.runner_pairing_codes.find(
-      (p) => p.code === code && !p.claimed_at && p.expires_at > now(),
-    );
+    const pairing = db.runner_pairing_codes.find((p) => p.code === code);
+    // Unbekannter Code = normaler Poll-Zustand des Runners
     if (!pairing) return [200, { status: "pending" }];
+    if (pairing.failed_attempts >= MAX_PAIRING_CODE_FAILURES) {
+      return [410, { error: "Pairing-Code gesperrt (zu viele Fehlversuche).", code: "code_blocked" }];
+    }
+    if (pairing.claimed_at || pairing.expires_at <= now()) {
+      pairing.failed_attempts = (pairing.failed_attempts ?? 0) + 1;
+      persist();
+      return [410, { error: "Pairing-Code abgelaufen oder bereits verwendet.", code: "code_invalid" }];
+    }
     const token = `lwr_${randomBytes(32).toString("base64url")}`;
+    // Zwei-Stufen-Pairing: Runner startet als pending_approval
     const runner = {
       id: randomUUID(),
       org_id: pairing.org_id,
@@ -554,8 +697,11 @@ function handleBroker(req, url, body) {
       capabilities: {},
       max_jobs_per_hour: 60,
       daily_job_limit: 500,
-      status: "online",
-      last_heartbeat: now(),
+      quiet_hours: null,
+      status: "pending_approval",
+      approved_by: null,
+      approved_at: null,
+      last_heartbeat: null,
       version: body.version ?? null,
       created_at: now(),
       updated_at: now(),
@@ -570,21 +716,29 @@ function handleBroker(req, url, body) {
       action: "runner.paired",
       entity_type: "runner",
       entity_id: runner.id,
-      detail: {},
+      detail: { status: "pending_approval" },
       created_at: now(),
     });
     persist();
-    return [200, { status: "paired", runnerId: runner.id, runnerToken: token, orgId: runner.org_id }];
+    return [200, { status: "paired", runnerId: runner.id, runnerToken: token, orgId: runner.org_id, pendingApproval: true }];
   }
 
   const runner = verifyRunner(req);
   if (!runner) return [401, { error: "Runner-Authentifizierung fehlgeschlagen" }];
 
+  // Selbstauskunft: auch für pending_approval erlaubt
+  if (action === "status") return [200, { status: runner.status }];
+
+  if (runner.status === "pending_approval") {
+    return [403, { error: "Runner wartet auf Freigabe in der PWA (Einstellungen → Runner).", code: "pending_approval" }];
+  }
+  if (runner.status === "disabled") {
+    return [403, { error: "Runner wurde deaktiviert.", code: "runner_disabled" }];
+  }
+
   switch (action) {
     case "claim": {
       const job = claimNextJob(runner.id);
-      Object.assign(runner, { last_heartbeat: now(), status: "online" });
-      persist();
       return [200, { job }];
     }
     case "heartbeat": {
@@ -626,7 +780,7 @@ function handleBroker(req, url, body) {
 }
 
 function handleBuildJobContext(req, _url, body) {
-  const runner = verifyRunner(req);
+  const runner = verifyActiveRunner(req);
   if (!runner) return [401, { error: "Runner-Authentifizierung fehlgeschlagen" }];
   const job = db.agent_jobs.find((j) => j.id === body.jobId);
   if (!job) return [404, { error: "Job nicht gefunden" }];
@@ -683,6 +837,8 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname.startsWith("/auth/v1/")) {
       [status, payload] = handleAuth(req, url, body);
+    } else if (url.pathname.startsWith("/rest/v1/rpc/")) {
+      [status, payload] = handleRpc(req, url, body);
     } else if (url.pathname.startsWith("/rest/v1/")) {
       [status, payload] = handleRest(req, url, body);
     } else if (url.pathname.startsWith("/functions/v1/runner-broker")) {

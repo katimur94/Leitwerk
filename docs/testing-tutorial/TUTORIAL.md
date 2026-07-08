@@ -37,7 +37,7 @@ pnpm --filter @leitwerk/pwa dev
 
 # 4. Runner pairen & starten (Terminal 3) — Code kommt aus Schritt 6 unten
 node apps/runner/dist/index.js init --url http://127.0.0.1:54321/functions/v1
-LEITWERK_CLAUDE_BIN="node tools/mock-server/claude-mock.cjs" node apps/runner/dist/index.js start
+LEITWERK_CLAUDE_BIN=tools/mock-server/claude-mock.cjs node apps/runner/dist/index.js start
 ```
 
 Screenshots neu erzeugen: `node tools/e2e-tutorial/run.mjs`
@@ -101,63 +101,75 @@ statt versteckt, damit klar ist, was kommt. **(2)** überspringt den Schritt.
 
 Das Herzstück des BYO-KI-Modells: **(1)** Der Nutzer startet den Runner auf seinem
 Rechner — der Runner zeigt im Terminal einen 8-stelligen Pairing-Code an und pollt den
-Broker. **(2)** Den Code in der PWA eintippen, **(3)** verbinden. Die PWA legt den Code
+Broker (alle 7 s, bewusst unter dem IP-Rate-Limit von 10 Versuchen/Minute).
+**(2)** Den Code in der PWA eintippen, **(3)** verbinden. Die PWA legt den Code
 in `runner_pairing_codes` ab (10 Minuten gültig); beim nächsten Poll löst der Runner ihn
 ein und erhält sein **Runner-Token** (nur als Hash in der DB — der Klartext existiert
-genau einmal in dieser Antwort).
+genau einmal in dieser Antwort). Nach 5 Fehlversuchen ist ein Code dauerhaft gesperrt.
 
-## 7 · Runner verbunden
+## 7 · Runner-Freigabe (Zwei-Stufen-Pairing)
 
-![Runner verbunden](img/07-onboarding-runner-verbunden.png)
+![Runner-Freigabe](img/07-onboarding-runner-freigabe.png)
+
+Etappe 0.5: Ein frisch gepairter Runner startet als **`pending_approval`** und darf
+nichts claimen — `claim_next_job` und die Broker-Authentifizierung lehnen ihn ab.
+**(1)** Die PWA zeigt Hostname, Provider und Pairing-Zeitpunkt. **(2)** Erst die
+Bestätigung durch Owner/Admin (`approve_runner`) schaltet den Runner auf `online`.
+**(3)** „Ablehnen“ (`reject_runner`) sperrt ihn dauerhaft — das Token wird unbrauchbar.
+Ein erratener Pairing-Code allein reicht damit nicht mehr für Datenzugriff.
+
+## 8 · Runner verbunden
+
+![Runner verbunden](img/08-onboarding-runner-verbunden.png)
 
 **(1)** Der Runner erscheint mit Hostname, Heartbeat und Provider-Badge
 („Claude CLI (Max-Abo)“). Das Onboarding-Flag `runner_paired` wird automatisch gesetzt.
 **(2)** „Weiter“ ist erst aktiv, wenn mindestens ein Runner verbunden ist —
 überspringen geht trotzdem.
 
-## 8 · Onboarding Schritt 4: Nummernkreise
+## 9 · Onboarding Schritt 4: Nummernkreise
 
-![Nummernkreise](img/08-onboarding-nummernkreise.png)
+![Nummernkreise](img/09-onboarding-nummernkreise.png)
 
 **(1)** Die vier automatisch angelegten Nummernkreise mit Vorschau der nächsten Nummer:
 Vorgänge (`V-2026-0001`), Angebote (`AN-`), Rechnungen (`RE-`), Mahnungen (`MA-`).
 **(2)** bestätigt — anpassen lassen sie sich später in den Einstellungen (Phase 3).
 
-## 9 · Onboarding abgeschlossen
+## 10 · Onboarding abgeschlossen
 
-![Fertig](img/09-onboarding-fertig.png)
+![Fertig](img/10-onboarding-fertig.png)
 
 **(1)** führt in die App-Shell. Das Onboarding merkt sich seinen Stand pro Flag —
 wer es unterbricht, landet beim nächsten Besuch am ersten offenen Schritt.
 
-## 10 · App-Shell: „Heute“
+## 11 · App-Shell: „Heute“
 
-![App-Shell](img/10-app-shell-heute.png)
+![App-Shell](img/11-app-shell-heute.png)
 
 Das Layout nach `docs/DESIGN.md`: **(1)** Icon-Rail (56 px) mit den fünf Hauptmodulen,
 **(2)** Kontext-Sidebar mit aktiver Organisation und Nutzer. **(3)** „Heute“ wird ab
 Phase 2 das Morgen-Briefing — bis dahin führt der Empty-State ehrlich zum nächsten
 sinnvollen Schritt. **(4)** Einstellungen und **(5)** Theme-Umschalter unten in der Rail.
 
-## 11 · Modul-Platzhalter
+## 12 · Modul-Platzhalter
 
-![Modul-Platzhalter](img/11-modul-platzhalter.png)
+![Modul-Platzhalter](img/12-modul-platzhalter.png)
 
 **(1)** Alle Module sind navigierbar, **(2)** zeigen aber statt leerer Flächen einen
 Empty-State mit ihrer Phase (Posteingang/Vorgänge → Phase 1, Aufgaben → Phase 2,
 Finanzen → Phase 3). Kein Feature ohne Empty-State — Regel 9 aus `CLAUDE.md`.
 
-## 12 · CommandBar (Strg/Cmd + K)
+## 13 · CommandBar (Strg/Cmd + K)
 
-![CommandBar](img/12-commandbar.png)
+![CommandBar](img/13-commandbar.png)
 
 **(1)** Von überall per Strg/Cmd+K: Navigation und Befehle (Theme wechseln, Abmelden),
 gefiltert beim Tippen. **(2)** Enter springt zum ersten Treffer, Esc schließt.
 In Phase 4 wird daraus die globale Suche (Volltext + semantisch).
 
-## 13 · Einstellungen → Runner
+## 14 · Einstellungen → Runner
 
-![Runner-Einstellungen](img/13-runner-einstellungen.png)
+![Runner-Einstellungen](img/14-runner-einstellungen.png)
 
 Die Kommandozentrale für den KI-Agenten: **(1)** Verbundene Runner mit Live-Status —
 grüner Punkt bedeutet Heartbeat jünger als 3 Minuten (dieselbe Schwelle nutzt der
@@ -165,29 +177,61 @@ Watchdog serverseitig). **(2)** Weitere Runner (Zweitrechner, VPS) jederzeit pai
 **(3)** Der Test-Job prüft die komplette KI-Kette. Ist kein Runner online, erscheint
 oben ein Hinweis-Banner — der Rest der App bleibt voll benutzbar.
 
-## 14 · Test-Job senden
+## 15 · Abo-Schutz: Limits & Nachtfenster
 
-![Test-Job gesendet](img/14-testjob-gesendet.png)
+![Runner-Limits](img/15-runner-limits.png)
+
+Etappe 0.5: **(1)** Max. Jobs pro Stunde und **(2)** pro Tag schützen das Claude-Abo —
+gezählt über die `claimed`-Ereignisse in `agent_job_events` (rollierende Fenster
+60 min/24 h), erzwungen **serverseitig** in `claim_next_job`, nicht nur im UI.
+**(3)** Das optionale Nachtfenster steuert, wann welche Jobs laufen: interaktive Jobs
+(Priorität ≤ 2) immer, normale Jobs nur außerhalb, Nacht-Batch (Priorität ≥ 8) nur
+innerhalb des Fensters. **(4)** speichert direkt auf dem Runner-Datensatz — der Client
+darf per Spalten-Grant nur diese Felder ändern (Status/Token bleiben Broker-Sache).
+
+## 16 · Test-Job senden
+
+![Test-Job gesendet](img/16-testjob-gesendet.png)
 
 **(1)** Beliebigen Testtext eingeben, **(2)** senden — das legt einen `echo`-Job mit
 Priorität 2 (interaktiv) in die Queue. **(3)** Der Job erscheint sofort als „Wartet“.
 Der Runner pollt alle 5 Sekunden, claimt den Job (Prioritäts-Sortierung, ein Versuch
 von maximal 3) und holt sich den Kontext von der Edge Function `build-job-context`.
 
-## 15 · KI-Antwort
+## 17 · KI-Antwort
 
-![KI-Antwort](img/15-testjob-ki-antwort.png)
+![KI-Antwort](img/17-testjob-ki-antwort.png)
 
 **(1)** Der Status läuft live durch: Wartet → Läuft → **Erledigt**. **(2)** Die Antwort
 der KI — das violette **KI-Badge** markiert überall in Leitwerk, was von der Maschine
 kommt (eiserne Design-Regel: Violett gibt es nur dafür). Der Runner hat den Prompt aus
 dem Kontext gebaut, die (Mock-)KI ausgeführt, die Antwort strikt mit Zod geparst und
 das Ergebnis mit Idempotenz-Hash über den Broker abgeliefert. Schlägt das Parsen fehl,
-gibt es genau einen Reparatur-Versuch; danach greift der Backoff-Retry der Queue.
+gibt es genau einen **schlanken Reparatur-Versuch** (nur Schema-Beschreibung +
+fehlerhafte Antwort, gekürzt auf 2000 Zeichen — nicht der komplette Original-Prompt);
+danach greift der Backoff-Retry der Queue.
 
-## 16 · Dark Mode
+## 18 · Regel-Builder (Einstellungen → Regeln)
 
-![Dark Mode](img/16-dark-mode.png)
+![Regel-Builder](img/18-regel-builder.png)
+
+Die Regel-Engine light (Etappe 0.5): **(1)** Jede Regel folgt dem Muster „Wenn
+*Ereignis* und *Bedingungen*, dann *Aktion*“. **(2)** Ereignisse wie `mail_received`,
+`invoice_captured`, `quote_sent` oder `payment_matched` werden ab Phase 1 von den
+Modulen ausgelöst. **(3)** Bedingungen prüfen Felder der Entity (UND-verknüpft, Operatoren
+von „ist gleich“ bis „fehlt“). **(4)** Ausgewertet wird serverseitig durch die
+Postgres-Funktion `evaluate_org_rules` — Aktionen: Benachrichtigung, Aufgabe oder KI-Job.
+
+## 19 · Regel aktiv
+
+![Regel-Liste](img/19-regel-liste.png)
+
+**(1)** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede Ausführung
+landet im Audit-Log (`rule.executed`).
+
+## 20 · Dark Mode
+
+![Dark Mode](img/20-dark-mode.png)
 
 **(1)** Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um
 (alle Design-Tokens aus `DESIGN.md`, inklusive angepasster Marken- und KI-Farben).
@@ -195,12 +239,15 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ---
 
-## Was hier Ende-zu-Ende bewiesen ist (Definition of Done P0)
+## Was hier Ende-zu-Ende bewiesen ist (Definition of Done P0 + Etappe 0.5)
 
 1. Registrierung → Org-Anlage → Onboarding-Wizard mit Stammdaten aus `org_profile` ✓
-2. Runner-Pairing über Pairing-Code + Token-Hash ✓
+2. Runner-Pairing über Pairing-Code + Token-Hash, gehärtet mit Rate-Limit,
+   Fehlversuchszähler und Zwei-Stufen-Freigabe (`pending_approval` → Bestätigung) ✓
 3. Dummy-Job `echo` läuft komplett durch: PWA → Queue → Runner → KI → Ergebnis in der PWA ✓
-4. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
+4. Abo-Schutz (Limits + Nachtfenster) einstellbar, serverseitig in `claim_next_job` erzwungen ✓
+5. Regel-Engine light: Regel anlegen, pausieren, löschen (Auswertung: `evaluate_org_rules`) ✓
+6. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
 
 Gegen echtes Supabase ist der Ablauf identisch — nur dass `supabase start` die
 Datenbank stellt, die Edge Functions in Deno laufen und Updates per Realtime statt

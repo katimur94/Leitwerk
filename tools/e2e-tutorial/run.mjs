@@ -21,7 +21,9 @@ const FUNCTIONS_URL = "http://127.0.0.1:54321/functions/v1";
 const IMG = join(ROOT, "docs/testing-tutorial/img");
 const TMP = join(ROOT, "tools/mock-server/tmp/shots");
 const CONFIG_DIR = join(ROOT, "tools/mock-server/tmp/runner-config");
-const CLAUDE_MOCK = `node ${join(ROOT, "tools/mock-server/claude-mock.cjs")}`;
+// Direkter Pfad (Shebang + Exec-Bit) — `spawn` ohne Shell kann keine
+// Kommandos mit Leerzeichen wie "node …/claude-mock.cjs" starten.
+const CLAUDE_MOCK = join(ROOT, "tools/mock-server/claude-mock.cjs");
 
 const VIEWPORT = { width: 1440, height: 900 };
 const ACCENT = "#3D5AFE";
@@ -131,13 +133,19 @@ let browser;
 try {
   rmSync(CONFIG_DIR, { recursive: true, force: true });
 
-  try {
-    browser = await chromium.launch({ channel: "chrome" });
-  } catch {
+  // Browser-Auswahl: expliziter Pfad (CI/Container) > Chrome > Edge > Playwright-Download
+  const explicitChromium = process.env.LEITWERK_E2E_CHROMIUM;
+  if (explicitChromium) {
+    browser = await chromium.launch({ executablePath: explicitChromium });
+  } else {
     try {
-      browser = await chromium.launch({ channel: "msedge" });
+      browser = await chromium.launch({ channel: "chrome" });
     } catch {
-      browser = await chromium.launch();
+      try {
+        browser = await chromium.launch({ channel: "msedge" });
+      } catch {
+        browser = await chromium.launch();
+      }
     }
   }
   const context = await browser.newContext({ viewport: VIEWPORT, locale: "de-DE" });
@@ -251,12 +259,30 @@ try {
   ]);
   await clickText(page, "Verbinden");
 
-  // Runner pollt /pair alle 3 s — auf Erfolg warten
-  await waitFor(() => init.out().includes("Pairing erfolgreich"), 30_000, "Pairing-Bestätigung");
+  // Runner pollt /pair alle 7 s — auf Erfolg warten
+  await waitFor(() => init.out().includes("Pairing erfolgreich"), 40_000, "Pairing-Bestätigung");
 
-  // ---- 07 Runner verbunden ----
+  // ---- 07 Runner-Freigabe (Zwei-Stufen-Pairing, Etappe 0.5) ----
   // Fokus-Event → TanStack Query refetcht die Runner-Liste sofort
   // (kein Reload: der lokale Wizard-Schritt würde sonst zurückspringen)
+  await waitFor(async () => {
+    await page.evaluate(() => {
+      window.dispatchEvent(new Event("focus"));
+      window.dispatchEvent(new Event("visibilitychange"));
+    });
+    await sleep(700);
+    return (await page.locator('button:has-text("Bestätigen")').count()) > 0;
+  }, 40_000, "Freigabe-Karte im Onboarding");
+  await capture("onboarding-runner-freigabe", [
+    { at: 'p:has-text("Neuer Runner wartet auf Freigabe")', label: "Zwei-Stufen-Pairing: Runner ist gepairt, aber noch gesperrt" },
+    { at: 'button:has-text("Bestätigen")', label: "Freigeben — erst danach darf er Jobs claimen" },
+    { at: 'button:has-text("Ablehnen")', label: "Unbekannte Runner ablehnen (Token wird ungültig)", side: "left" },
+  ]);
+  await clickText(page, "Bestätigen");
+  // Der Runner pollt /status alle 10 s und meldet die Freigabe im Terminal
+  await waitFor(() => init.out().includes("Runner freigegeben"), 60_000, "Freigabe beim Runner angekommen");
+
+  // ---- 08 Runner verbunden ----
   await waitFor(async () => {
     await page.evaluate(() => {
       window.dispatchEvent(new Event("focus"));
@@ -266,12 +292,12 @@ try {
     return (await page.locator('li:has-text("Letzter Heartbeat")').count()) > 0;
   }, 40_000, "Runner-Zeile im Onboarding");
   await capture("onboarding-runner-verbunden", [
-    { at: 'li:has-text("Letzter Heartbeat")', label: "Runner ist gepairt und online" },
+    { at: 'li:has-text("Letzter Heartbeat")', label: "Runner ist gepairt und freigegeben" },
     { at: 'button:has-text("Weiter")', label: "Weiter — erst aktiv, wenn ein Runner da ist", side: "left" },
   ]);
   await clickText(page, "Weiter");
 
-  // ---- 08 Nummernkreise ----
+  // ---- 09 Nummernkreise ----
   await page.waitForSelector('li:has-text("Rechnungen")');
   await capture("onboarding-nummernkreise", [
     { at: 'li:has-text("Vorgänge")', label: "Automatisch angelegt (V-/AN-/RE-/MA-)" },
@@ -279,14 +305,14 @@ try {
   ]);
   await clickText(page, "Weiter");
 
-  // ---- 09 Fertig ----
+  // ---- 10 Fertig ----
   await page.waitForSelector('button:has-text("Zur App")');
   await capture("onboarding-fertig", [
     { at: 'button:has-text("Zur App")', label: "Einrichtung abgeschlossen → App-Shell" },
   ]);
   await clickText(page, "Zur App");
 
-  // ---- 10 App-Shell / Heute ----
+  // ---- 11 App-Shell / Heute ----
   await page.waitForSelector("nav");
   await capture("app-shell-heute", [
     { at: 'nav a[title="Heute"]', label: "Icon-Rail: Heute · Posteingang · Vorgänge · Aufgaben · Finanzen" },
@@ -296,7 +322,7 @@ try {
     { at: 'nav button[title="Design wechseln"]', label: "Hell/Dunkel umschalten" },
   ]);
 
-  // ---- 11 Modul-Platzhalter (Posteingang) ----
+  // ---- 12 Modul-Platzhalter (Posteingang) ----
   await page.click('nav [title="Posteingang"]');
   await page.waitForSelector('main :text("Phase 1")');
   await capture("modul-platzhalter", [
@@ -304,7 +330,7 @@ try {
     { at: "main p", label: "… und zeigen ehrlich ihre Phase (kein leerer Screen)" },
   ]);
 
-  // ---- 12 CommandBar (Cmd/Strg+K) ----
+  // ---- 13 CommandBar (Cmd/Strg+K) ----
   await page.keyboard.press("Control+KeyK");
   await page.waitForSelector('input[placeholder*="Suchen"]');
   await capture("commandbar", [
@@ -313,7 +339,7 @@ try {
   ]);
   await page.keyboard.press("Escape");
 
-  // ---- 13 Runner-Einstellungen (Runner läuft) ----
+  // ---- 14 Runner-Einstellungen (Runner läuft) ----
   const runner = startProcess(["apps/runner/dist/index.js", "start"], {
     LEITWERK_CLAUDE_BIN: CLAUDE_MOCK,
   });
@@ -328,7 +354,21 @@ try {
     { at: 'h3:has-text("Test-Job")', label: "Ende-zu-Ende-Test der KI-Kette" },
   ]);
 
-  // ---- 14 Test-Job senden ----
+  // ---- 15 Abo-Schutz: Limits & Nachtfenster (Etappe 0.5) ----
+  await page.locator('button:has-text("Limits")').first().click();
+  await page.waitForSelector('label:has-text("Max. Jobs pro Stunde")');
+  await page.locator('label:has-text("Nachtfenster") input[type="checkbox"]').check();
+  await page.waitForSelector('input[type="time"]');
+  await capture("runner-limits", [
+    { at: 'label:has-text("Max. Jobs pro Stunde")', label: "Stundenlimit — schont das Claude-Abo" },
+    { at: 'label:has-text("Max. Jobs pro Tag")', label: "Hartes Tageslimit" },
+    { at: 'label:has-text("Nachtfenster")', label: "Batch-Jobs nur im Nachtfenster, interaktive immer", side: "left" },
+    { at: 'form:has(label:has-text("Max. Jobs pro Stunde")) button[type="submit"]', label: "Serverseitig erzwungen in claim_next_job", side: "left" },
+  ]);
+  await page.locator('form:has(label:has-text("Max. Jobs pro Stunde")) button[type="submit"]').click();
+  await page.waitForSelector(':text("Gespeichert.")');
+
+  // ---- 16 Test-Job senden ----
   await page.fill("#testjob-text", "Sag Hallo an das DiTom-Team!");
   await page.click('button:has-text("Test-Job senden")');
   await page.waitForSelector('li :text-matches("Wartet|Übernommen|Läuft")', { timeout: 5000 }).catch(() => {});
@@ -338,7 +378,7 @@ try {
     { at: 'li:has(span:text-matches("Wartet|Übernommen|Läuft"))', label: "Job in der Queue — der Runner claimt ihn in ~5 s", side: "left" },
   ]);
 
-  // ---- 15 Test-Job erledigt (KI-Antwort) ----
+  // ---- 17 Test-Job erledigt (KI-Antwort) ----
   await waitFor(async () => {
     await page.reload();
     await sleep(600);
@@ -350,7 +390,28 @@ try {
     { at: 'p:has-text("Mock-Antwort")', label: "KI-Antwort — violettes Badge = kommt von der KI" },
   ]);
 
-  // ---- 16 Dark Mode ----
+  // ---- 18 Regel-Builder (Etappe 0.5) ----
+  await page.goto(`${BASE}/einstellungen/regeln`);
+  await page.waitForSelector('h3:has-text("Neue Regel")');
+  await page.fill("#rule-name", "Rechnungen sofort melden");
+  await page.selectOption("#rule-event", "invoice_captured");
+  await page.click('button:has-text("Bedingung hinzufügen")');
+  await page.fill('input[placeholder*="Feld"]', "category");
+  await page.fill('input[placeholder="Wert"]', "invoice");
+  await page.fill("#rule-action-title", "Neue Eingangsrechnung prüfen");
+  await capture("regel-builder", [
+    { at: 'h3:has-text("Neue Regel")', label: "Wenn Ereignis + Bedingungen, dann Aktion" },
+    { at: "#rule-event", label: "Ereignis — ab Phase 1 von den Modulen ausgelöst" },
+    { at: 'input[placeholder="Wert"]', label: "Bedingungen (UND-verknüpft)", side: "left" },
+    { at: 'button:has-text("Regel anlegen")', label: "Auswertung serverseitig: evaluate_org_rules", side: "left" },
+  ]);
+  await page.click('button:has-text("Regel anlegen")');
+  await page.waitForSelector('li:has-text("Rechnungen sofort melden")');
+  await capture("regel-liste", [
+    { at: 'li:has-text("Rechnungen sofort melden")', label: "Regel aktiv — pausieren oder löschen jederzeit" },
+  ]);
+
+  // ---- 19 Dark Mode ----
   await page.click('nav button[title="Design wechseln"]');
   await sleep(400);
   await capture("dark-mode", [
