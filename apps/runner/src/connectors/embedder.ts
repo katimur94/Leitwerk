@@ -10,7 +10,7 @@
 //    auf 1024 Dimensionen, L2-normalisiert). Ehrlich gekennzeichnet als
 //    'hash-fallback' — grobe Ähnlichkeit statt echter Semantik, aber
 //    reproduzierbar und offline. Für Produktion Modell konfigurieren
-//    (tutorials/06_runner_setup.md).
+//    (tutorials/05_runner_installation.md (Abschnitt 6)).
 import { spawn } from "node:child_process";
 
 export const EMBEDDING_DIM = 1024;

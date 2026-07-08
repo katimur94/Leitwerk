@@ -2,7 +2,7 @@
 // Transkription läuft IMMER lokal beim Nutzer (whisper.cpp) — keine Cloud.
 //
 // Vertrag: LEITWERK_WHISPER_BIN zeigt auf ein Programm (bzw. einen kleinen
-// Wrapper um whisper.cpp, siehe tutorials/06_runner_setup.md), das als
+// Wrapper um whisper.cpp, siehe tutorials/05_runner_installation.md (Abschnitt 6)), das als
 // Argument den Pfad zur Audiodatei bekommt und auf stdout JSON liefert:
 //   {"transcript": "…", "segments": [{"speaker": null, "starts_sec": 0,
 //     "ends_sec": 4.2, "content": "…"}]}
@@ -33,7 +33,7 @@ export async function transcribeAudio(
   if (!bin) {
     throw new Error(
       "Whisper ist nicht konfiguriert (LEITWERK_WHISPER_BIN). " +
-        "Siehe tutorials/06_runner_setup.md — Transkription läuft nur lokal.",
+        "Siehe tutorials/05_runner_installation.md (Abschnitt 6) — Transkription läuft nur lokal.",
     );
   }
   const dir = mkdtempSync(join(tmpdir(), "leitwerk-audio-"));

@@ -221,6 +221,37 @@ export function createMailHub({ db, persist }) {
           unit: "Pauschale", unit_price: 1000, vat_rate: 19, net_total: 1000,
         });
       }
+      // Etappe-4-Demo: eine bewährte Stufe-3-Automation mit Aktion in der
+      // Halte-Zone (auto_send_reply, Trefferquote hoch → Hochstufung war erlaubt).
+      const sendReply = db.automations.find((a) => a.org_id === orgId && a.key === "auto_send_reply");
+      if (sendReply && !db.automation_runs.some((r) => r.org_id === orgId && r.status === "holding")) {
+        sendReply.autonomy_level = 3;
+        if (!db.trust_stats.some((s) => s.automation_id === sendReply.id)) {
+          db.trust_stats.push({
+            automation_id: sendReply.id, org_id: orgId, total_runs: 60, correct_runs: 58,
+            last_50_correct: 49, last_50_total: 50, accuracy: 58 / 60, updated_at: now(),
+          });
+        }
+        const acct = db.mail_accounts.find((a) => a.org_id === orgId);
+        const holdUntil = new Date(Date.now() + 15 * 60_000).toISOString();
+        const draft = {
+          id: randomUUID(), org_id: orgId, account_id: acct?.id ?? null, thread_id: null,
+          created_by: null, source: "automation", job_id: null,
+          to_addrs: [{ email: "kunde@example.com" }], cc_addrs: [],
+          subject: "Re: Ihre Anfrage",
+          body_html: "<p>Guten Tag,</p><p>gern senden wir Ihnen die gewünschten Unterlagen zu.</p>",
+          attachments: [], status: "scheduled", send_after: holdUntil,
+          sent_message_id: null, created_at: now(), updated_at: now(),
+        };
+        db.mail_drafts.push(draft);
+        db.automation_runs.push({
+          id: randomUUID(), org_id: orgId, automation_id: sendReply.id, job_id: null,
+          entity_type: "mail_thread", entity_id: null, action: "Auto-Antwort: Re: Ihre Anfrage",
+          autonomy_level: 3, confidence: 0.96, status: "holding", hold_until: holdUntil,
+          outcome: null, outcome_by: null, outcome_at: null,
+          detail: { draft_id: draft.id }, executed_at: null, created_at: now(),
+        });
+      }
       enqueueSyncJobs();
       return [302, null, { Location: `http://localhost:5173/einstellungen/postfaecher?connected=${DEMO_EMAIL}` }];
     }
@@ -456,6 +487,17 @@ export function createMailHub({ db, persist }) {
     });
     const c = db.cases.find((x) => x.id === caseId);
     if (c) c.last_activity_at = now();
+  }
+
+  // Spiegel von notify_org (Migration 019): eine Notification je aktivem Mitglied.
+  function notifyOrg(orgId, kind, title, entityType, entityId) {
+    for (const member of db.org_members.filter((m) => m.org_id === orgId && m.is_active)) {
+      db.notifications.push({
+        id: randomUUID(), org_id: orgId, user_id: member.user_id, kind, title,
+        body: null, entity_type: entityType, entity_id: entityId,
+        read_at: null, pushed_at: null, created_at: now(),
+      });
+    }
   }
 
   // ---------- Regel-Engine light (Spiegel von evaluate_org_rules) ----------
@@ -774,7 +816,118 @@ export function createMailHub({ db, persist }) {
           }, 6);
         }
       }
+
+    // ---------- Etappe 4 ----------
+    } else if (job.job_type === "transcribe_note") {
+      const note = db.notes.find((n) => n.id === job.payload?.note_id);
+      if (note) {
+        Object.assign(note, { body_md: result.transcript || note.body_md, source: "voice", updated_at: now() });
+      }
+    } else if (job.job_type === "transcribe_meeting") {
+      const meeting = db.meetings.find((m) => m.id === job.payload?.meeting_id);
+      if (meeting) {
+        Object.assign(meeting, {
+          transcript: result.transcript, transcript_done_at: now(), job_id: job.id, updated_at: now(),
+        });
+        db.meeting_segments = db.meeting_segments.filter((s) => s.meeting_id !== meeting.id);
+        for (const seg of result.segments ?? []) {
+          db.meeting_segments.push({
+            id: randomUUID(), meeting_id: meeting.id, org_id: job.org_id,
+            speaker: seg.speaker ?? null, starts_sec: seg.starts_sec ?? null,
+            ends_sec: seg.ends_sec ?? null, content: seg.content ?? "",
+          });
+        }
+        if (!db.agent_jobs.some(
+          (j) => j.job_type === "summarize_meeting" && j.payload?.meeting_id === meeting.id,
+        )) {
+          pushJob(job.org_id, "summarize_meeting", { meeting_id: meeting.id }, 4);
+        }
+      }
+    } else if (job.job_type === "summarize_meeting") {
+      const meeting = db.meetings.find((m) => m.id === job.payload?.meeting_id);
+      if (meeting) {
+        Object.assign(meeting, {
+          protocol_md: result.protocol_md ?? null,
+          decisions: result.decisions ?? [],
+          open_questions: result.open_questions ?? [],
+          updated_at: now(),
+        });
+        for (const task of result.tasks ?? []) {
+          if (db.tasks.some(
+            (t) => t.org_id === job.org_id && t.source === "meeting" &&
+              t.source_entity_id === meeting.id && t.title === task.title,
+          )) continue;
+          db.tasks.push({
+            id: randomUUID(), org_id: job.org_id, case_id: meeting.case_id ?? null,
+            title: task.title, description: task.assignee_hint ?? null, status: "open",
+            due_at: task.due_at ?? null, assignee_id: null, created_by: null,
+            source: "meeting", source_entity_type: "meeting", source_entity_id: meeting.id,
+            job_id: job.id, recurrence: null, completed_at: null,
+            created_at: now(), updated_at: now(),
+          });
+        }
+        if (meeting.case_id) {
+          pushCaseEvent(job.org_id, meeting.case_id, "meeting_summarized",
+            `Protokoll: ${meeting.title}`, "meeting", meeting.id, "ai");
+        }
+        notifyOrg(job.org_id, "meeting_summarized", `Protokoll fertig: ${meeting.title}`, "meeting", meeting.id);
+      }
+    } else if (job.job_type === "knowledge_distill") {
+      let added = 0;
+      for (const fact of result.facts ?? []) {
+        if (!fact.fact) continue;
+        if (db.knowledge_items.some(
+          (k) => k.org_id === job.org_id && k.fact.toLowerCase() === fact.fact.toLowerCase() && k.status !== "rejected",
+        )) continue;
+        let companyId = null;
+        if (fact.company_name) {
+          companyId = db.companies.find(
+            (c) => c.org_id === job.org_id && c.name.toLowerCase() === fact.company_name.toLowerCase(),
+          )?.id ?? null;
+        }
+        db.knowledge_items.push({
+          id: randomUUID(), org_id: job.org_id, fact: fact.fact,
+          category: fact.category ?? null, company_id: companyId, contact_id: null,
+          source_type: fact.source_type ?? null, source_id: fact.source_id ?? null,
+          confidence: fact.confidence ?? 0.8, status: "proposed", confirmed_by: null,
+          job_id: job.id, created_at: now(), updated_at: now(),
+        });
+        added += 1;
+      }
+      if (added > 0) {
+        notifyOrg(job.org_id, "knowledge_proposed", `${added} neue Wissens-Vorschläge zum Prüfen`, "knowledge_item", null);
+      }
+    } else if (job.job_type === "build_style_profile") {
+      const account = db.mail_accounts.find((a) => a.id === job.payload?.account_id);
+      const userId = account?.user_id ?? null;
+      if (userId) {
+        const existing = db.ai_style_profiles.find((p) => p.org_id === job.org_id && p.user_id === userId);
+        const row = {
+          id: existing?.id ?? randomUUID(), org_id: job.org_id, user_id: userId,
+          profile: result.profile ?? {}, sample_count: result.sample_count ?? 0,
+          built_at: now(), created_at: existing?.created_at ?? now(), updated_at: now(),
+        };
+        if (existing) Object.assign(existing, row);
+        else db.ai_style_profiles.push(row);
+      }
+    } else if (job.job_type === "embed_backlog") {
+      for (const item of result.items ?? []) {
+        if (!Array.isArray(item.embedding) || item.embedding.length !== 1024) continue;
+        const existing = db.embeddings.find(
+          (e) => e.entity_type === item.entity_type && e.entity_id === item.entity_id &&
+            e.chunk_index === (item.chunk_index ?? 0),
+        );
+        const row = {
+          id: existing?.id ?? randomUUID(), org_id: job.org_id,
+          entity_type: item.entity_type, entity_id: item.entity_id,
+          chunk_index: item.chunk_index ?? 0, content: item.content ?? "",
+          embedding: item.embedding, created_at: now(),
+        };
+        if (existing) Object.assign(existing, row);
+        else db.embeddings.push(row);
+      }
     }
+    // semantic_search: kein Nebeneffekt — das Ergebnis (Query-Vektor) liest search_combined direkt.
     persist();
   }
 
@@ -1003,6 +1156,100 @@ export function createMailHub({ db, persist }) {
             }),
         };
       }
+
+      // ---------- Etappe 4 ----------
+      case "transcribe_note": {
+        const note = db.notes.find((n) => n.id === job.payload?.note_id);
+        if (!note) return null;
+        return {
+          jobId: job.id, jobType: "transcribe_note", locale: "de-DE",
+          note_id: note.id, audio_storage_path: String(job.payload?.audio_storage_path ?? ""),
+        };
+      }
+      case "transcribe_meeting": {
+        const meeting = db.meetings.find((m) => m.id === job.payload?.meeting_id);
+        if (!meeting || !meeting.audio_storage_path) return null;
+        return {
+          jobId: job.id, jobType: "transcribe_meeting", locale: "de-DE",
+          meeting_id: meeting.id, title: meeting.title ?? "",
+          audio_storage_path: meeting.audio_storage_path,
+        };
+      }
+      case "summarize_meeting": {
+        const meeting = db.meetings.find((m) => m.id === job.payload?.meeting_id);
+        if (!meeting || !meeting.transcript) return null;
+        const kase = db.cases.find((c) => c.id === meeting.case_id);
+        return {
+          jobId: job.id, jobType: "summarize_meeting", locale: "de-DE",
+          today: now().slice(0, 10),
+          meeting: {
+            meeting_id: meeting.id, title: meeting.title ?? "", held_at: meeting.held_at,
+            case_number: kase?.case_number ?? null,
+            transcript_excerpt: (meeting.transcript ?? "").slice(0, 12000),
+          },
+        };
+      }
+      case "knowledge_distill": {
+        const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+        const sources = [
+          ...db.mail_messages
+            .filter((m) => m.org_id === job.org_id && m.direction === "inbound" && m.created_at >= since)
+            .slice(0, 20)
+            .map((m) => ({
+              source_type: "mail_message", source_id: m.id, title: m.subject ?? "",
+              excerpt: (m.body_text ?? "").slice(0, 800), counterpart: m.from_addr?.email ?? "",
+            })),
+          ...db.meetings
+            .filter((m) => m.org_id === job.org_id && m.protocol_md)
+            .slice(0, 10)
+            .map((m) => ({
+              source_type: "meeting", source_id: m.id, title: m.title ?? "",
+              excerpt: (m.protocol_md ?? "").slice(0, 800), counterpart: "",
+            })),
+        ].slice(0, 40);
+        return {
+          jobId: job.id, jobType: "knowledge_distill", locale: "de-DE",
+          today: now().slice(0, 10),
+          sources,
+          known_facts: db.knowledge_items
+            .filter((k) => k.org_id === job.org_id && k.status !== "rejected")
+            .map((k) => k.fact),
+        };
+      }
+      case "build_style_profile": {
+        const account = db.mail_accounts.find((a) => a.id === job.payload?.account_id);
+        if (!account) return null;
+        return {
+          jobId: job.id, jobType: "build_style_profile", locale: "de-DE",
+          account_id: account.id,
+          sent_samples: db.mail_messages
+            .filter((m) => m.account_id === account.id && m.direction === "outbound")
+            .slice(-20)
+            .map((m) => (m.body_text ?? "").slice(0, 600))
+            .filter((s) => s.length > 40),
+        };
+      }
+      case "embed_backlog": {
+        const done = new Set(db.embeddings.filter((e) => e.org_id === job.org_id).map((e) => `${e.entity_type}:${e.entity_id}`));
+        const pending = [];
+        const push = (type, id, content) => {
+          if (pending.length >= 64 || !content?.trim() || done.has(`${type}:${id}`)) return;
+          pending.push({ entity_type: type, entity_id: id, chunk_index: 0, content: content.slice(0, 2000) });
+        };
+        for (const m of db.mail_messages.filter((x) => x.org_id === job.org_id).slice(-40)) {
+          push("mail_message", m.id, `${m.subject ?? ""}\n${m.body_text ?? ""}`);
+        }
+        for (const n of db.notes.filter((x) => x.org_id === job.org_id)) push("note", n.id, `${n.title ?? ""}\n${n.body_md ?? ""}`);
+        for (const k of db.knowledge_items.filter((x) => x.org_id === job.org_id && x.status !== "rejected")) push("knowledge_item", k.id, k.fact);
+        for (const s of db.meeting_segments.filter((x) => x.org_id === job.org_id)) push("meeting_segment", s.id, s.content);
+        return { jobId: job.id, jobType: "embed_backlog", locale: "de-DE", pending };
+      }
+      case "semantic_search":
+        return {
+          jobId: job.id, jobType: "semantic_search", locale: "de-DE",
+          query: String(job.payload?.query ?? "").slice(0, 500),
+        };
+
       default:
         return null;
     }
@@ -1096,6 +1343,130 @@ export function createMailHub({ db, persist }) {
       persist();
       return [204, null];
     }
+
+    // ---------- Etappe 4 ----------
+    if (fn === "set_autonomy_level") {
+      const auto = db.automations.find((a) => a.id === body.p_automation);
+      if (!auto) return [400, { message: "Automation nicht gefunden" }];
+      const level = Number(body.p_level);
+      if (level < 1 || level > 4) return [400, { message: "Ungültige Stufe" }];
+      // Hochstufen-Gate (Spiegel von set_autonomy_level, Migration 021)
+      if (level >= 3 && level > auto.autonomy_level) {
+        const stats = db.trust_stats.find((s) => s.automation_id === auto.id);
+        const total = stats?.last_50_total ?? 0;
+        const quote = total === 0 ? 0 : (stats?.last_50_correct ?? 0) / total;
+        if (total < auto.promote_min_runs || quote < auto.promote_threshold) {
+          return [400, {
+            code: "P0004",
+            message: `Hochstufung erst ab ${Math.round(auto.promote_threshold * 100)} % Trefferquote über mindestens ` +
+              `${auto.promote_min_runs} Läufe (aktuell: ${Math.round(quote * 100)} % über ${total} Läufe)`,
+          }];
+        }
+      }
+      auto.autonomy_level = level;
+      auto.updated_at = now();
+      db.audit_log.push({
+        id: db.audit_log.length + 1, org_id: auto.org_id, actor_type: "user",
+        actor_id: user?.id ?? null, action: "automation.level_changed",
+        entity_type: "automation", entity_id: auto.id,
+        detail: { level, key: auto.key }, created_at: now(),
+      });
+      persist();
+      return [200, auto];
+    }
+
+    if (fn === "stop_automation_run") {
+      const run = db.automation_runs.find((r) => r.id === body.p_run);
+      if (!run) return [400, { message: "Lauf nicht gefunden" }];
+      if (run.status !== "holding") return [400, { message: "Lauf ist nicht in der Halte-Zone" }];
+      run.status = "stopped";
+      run.decided_by = user?.id ?? null;
+      const draftId = run.detail?.draft_id ?? null;
+      if (draftId) {
+        const draft = db.mail_drafts.find((d) => d.id === draftId);
+        if (draft && draft.status === "scheduled") {
+          Object.assign(draft, { status: "draft", send_after: null, updated_at: now() });
+        }
+      }
+      if (run.entity_type === "dunning_run") {
+        const dunning = db.dunning_runs.find((d) => d.id === run.entity_id && d.status === "approved");
+        if (dunning) dunning.status = "proposed";
+      }
+      // Stopp = Korrektur → speist Trefferquote
+      const outcomeResult = rpc("record_automation_outcome",
+        { p_run_id: run.id, p_outcome: "corrected" }, user);
+      if (outcomeResult && outcomeResult[0] >= 400) return outcomeResult;
+      db.audit_log.push({
+        id: db.audit_log.length + 1, org_id: run.org_id, actor_type: "user",
+        actor_id: user?.id ?? null, action: "automation.stopped",
+        entity_type: run.entity_type, entity_id: run.entity_id,
+        detail: run.detail ?? {}, created_at: now(),
+      });
+      persist();
+      return [204, null];
+    }
+
+    if (fn === "search_combined") {
+      const orgId = body.p_org;
+      const q = String(body.p_query ?? "").trim().toLowerCase();
+      if (!q) return [200, []];
+      const hit = (text) => (text ?? "").toLowerCase().includes(q);
+      const results = [];
+      for (const m of db.mail_messages.filter((x) => x.org_id === orgId)) {
+        if (hit(m.subject) || hit(m.body_text)) {
+          results.push({ entity_type: "mail_message", entity_id: m.id,
+            title: m.subject || "(ohne Betreff)", snippet: (m.body_text ?? "").slice(0, 160),
+            rank: 0.6, via: "volltext" });
+        }
+      }
+      for (const c of db.cases.filter((x) => x.org_id === orgId && !x.deleted_at)) {
+        if (hit(c.title) || hit(c.case_number)) {
+          results.push({ entity_type: "case", entity_id: c.id, title: c.title,
+            snippet: c.case_number ?? "", rank: 0.5, via: "volltext" });
+        }
+      }
+      for (const n of db.notes.filter((x) => x.org_id === orgId)) {
+        if (hit(n.title) || hit(n.body_md)) {
+          results.push({ entity_type: "note", entity_id: n.id, title: n.title || "Notiz",
+            snippet: (n.body_md ?? "").slice(0, 160), rank: 0.4, via: "volltext" });
+        }
+      }
+      for (const k of db.knowledge_items.filter((x) => x.org_id === orgId && x.status !== "rejected")) {
+        if (hit(k.fact)) {
+          results.push({ entity_type: "knowledge_item", entity_id: k.id, title: k.fact,
+            snippet: k.category ?? "", rank: 0.4, via: "volltext" });
+        }
+      }
+      // Semantisch: Query-Vektor aus dem semantic_search-Job (falls vorhanden)
+      const seen = new Set(results.map((r) => r.entity_id));
+      if (body.p_embedding_job) {
+        const job = db.agent_jobs.find(
+          (j) => j.id === body.p_embedding_job && j.org_id === orgId &&
+            j.job_type === "semantic_search" && j.status === "done" && j.result?.embedding,
+        );
+        const vec = job?.result?.embedding;
+        if (Array.isArray(vec)) {
+          const cos = (a) => {
+            let dot = 0, na = 0, nb = 0;
+            for (let i = 0; i < a.length; i += 1) { dot += a[i] * (vec[i] ?? 0); na += a[i] * a[i]; nb += (vec[i] ?? 0) ** 2; }
+            return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+          };
+          db.embeddings
+            .filter((e) => e.org_id === orgId && !seen.has(e.entity_id))
+            .map((e) => ({ e, sim: cos(e.embedding) }))
+            .sort((a, b) => b.sim - a.sim)
+            .slice(0, 12)
+            .forEach(({ e, sim }) => results.push({
+              entity_type: e.entity_type, entity_id: e.entity_id,
+              title: (e.content ?? "").slice(0, 80), snippet: (e.content ?? "").slice(0, 160),
+              rank: sim, via: "semantisch",
+            }));
+        }
+      }
+      results.sort((a, b) => b.rank - a.rank);
+      return [200, results.slice(0, 20)];
+    }
+
     return null;
   }
 
@@ -1131,12 +1502,28 @@ export function createMailHub({ db, persist }) {
         ["morning_briefing", 6],
         ["followup_check", 7],
         ["gap_scan", 8],
+        // Etappe 4: Wissen destillieren + Embeddings nachziehen (Nacht-Batch)
+        ["knowledge_distill", 9],
+        ["embed_backlog", 9],
       ]) {
         const recent = db.agent_jobs.some(
           (j) => j.org_id === org.id && j.job_type === jobType &&
             (["queued", "claimed", "running"].includes(j.status) || j.created_at > fiveMinAgo),
         );
         if (!recent) pushJob(org.id, jobType, { scope: "org" }, priority);
+      }
+
+      // Etappe 4: Stil-Profil pro Konto (build_style_profile)
+      for (const account of db.mail_accounts.filter((a) => a.org_id === org.id)) {
+        const hasSent = db.mail_messages.some(
+          (m) => m.account_id === account.id && m.direction === "outbound",
+        );
+        const recent = db.agent_jobs.some(
+          (j) => j.org_id === org.id && j.job_type === "build_style_profile" &&
+            j.payload?.account_id === account.id &&
+            (["queued", "claimed", "running"].includes(j.status) || j.created_at > fiveMinAgo),
+        );
+        if (hasSent && !recent) pushJob(org.id, "build_style_profile", { account_id: account.id }, 9);
       }
 
       // Etappe 3: Mahnvorschläge für überfällige Rechnungen (Spiegel von

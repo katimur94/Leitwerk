@@ -70,7 +70,7 @@ export const summarizeMeetingResultSchema = z.object({
     .array(
       z.object({
         title: z.string().min(3),
-        assignee_hint: z.string().optional(),
+        assignee_hint: z.string().nullable().optional(),
         due_at: z.string().nullable().default(null),
       }),
     )

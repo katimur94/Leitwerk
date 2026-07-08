@@ -65,6 +65,13 @@ const emptyDb = () => ({
   quotes: [],
   quote_items: [],
   dunning_runs: [],
+  // Etappe 4: Autonomie & Wissen
+  notes: [],
+  knowledge_items: [],
+  meetings: [],
+  meeting_segments: [],
+  embeddings: [],
+  ai_style_profiles: [],
 });
 
 // Rate-Limit auf /pair (Migration 017) — Fenster pro Minute, im Speicher.
@@ -180,6 +187,7 @@ function onOrgCreated(org) {
       key,
       name,
       autonomy_level: 1,
+      hold_minutes: 15,
       is_enabled: true,
       min_confidence: 0.9,
       promote_threshold: 0.95,
@@ -280,6 +288,26 @@ const tableDefaults = {
   quote_items: () => ({
     id: randomUUID(), position: 0, description: "Position", quantity: 1,
     unit: "Stk", unit_price: 0, vat_rate: 19, net_total: 0,
+  }),
+  notes: () => ({
+    id: randomUUID(),
+    case_id: null, contact_id: null, title: null,
+    source: "manual", created_by: null,
+    created_at: now(), updated_at: now(),
+  }),
+  knowledge_items: () => ({
+    id: randomUUID(),
+    category: null, company_id: null, contact_id: null,
+    source_type: null, source_id: null, confidence: 0.8,
+    status: "proposed", confirmed_by: null, job_id: null,
+    created_at: now(), updated_at: now(),
+  }),
+  meetings: () => ({
+    id: randomUUID(),
+    case_id: null, held_at: now(), audio_storage_path: null,
+    transcript: null, transcript_done_at: null, protocol_md: null,
+    decisions: [], open_questions: [], participants: [],
+    job_id: null, created_by: null, created_at: now(), updated_at: now(),
   }),
   agent_jobs: () => ({
     id: randomUUID(),
@@ -585,7 +613,12 @@ function applySelect(table, rows, url) {
   if (table === "automation_runs" && select.includes("automations")) {
     return rows.map((row) => {
       const automation = db.automations.find((a) => a.id === row.automation_id);
-      return { ...row, automations: automation ? { key: automation.key } : null };
+      return {
+        ...row,
+        automations: automation
+          ? { key: automation.key, name: automation.name, hold_minutes: automation.hold_minutes }
+          : null,
+      };
     });
   }
   if (table === "automations" && select.includes("trust_stats")) {
@@ -999,7 +1032,7 @@ function handleBuildJobContext(req, _url, body) {
 const CORS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, prefer, accept, accept-profile, content-profile, x-runner-id, x-runner-token, x-supabase-api-version",
+    "authorization, x-client-info, apikey, content-type, prefer, accept, accept-profile, content-profile, x-runner-id, x-runner-token, x-supabase-api-version, x-upsert, cache-control, x-metadata",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS, HEAD",
   "Access-Control-Expose-Headers": "content-range",
 };
@@ -1059,8 +1092,16 @@ const server = http.createServer(async (req, res) => {
     } else if (url.pathname.startsWith("/gmail/v1/users/me")) {
       [status, payload] = mailHub.handleGmailApi(req, url);
     } else if (url.pathname.startsWith("/storage/v1/object/")) {
-      // Upload-Stub: Blob wird verworfen, Pfad bestätigt (nur Demo)
-      [status, payload] = [200, { Key: url.pathname.replace("/storage/v1/object/", "") }];
+      // Upload-Stub: Blob nach mock_storage legen (Etappe 4: Audio → Whisper).
+      // Objekt-URL: /storage/v1/object/<bucket>/<pfad> → Schlüssel ist <pfad>.
+      const rest = url.pathname.replace("/storage/v1/object/", "");
+      const key = rest.replace(/^[^/]+\//, ""); // Bucket-Präfix entfernen
+      if (req.method === "POST" || req.method === "PUT") {
+        db.mock_storage = db.mock_storage ?? {};
+        db.mock_storage[key] = (body && body.__rawBase64) || "";
+        persist();
+      }
+      [status, payload] = [200, { Key: rest }];
     } else if (url.pathname.startsWith("/realtime/")) {
       // Kein Websocket im Mock — PWA fällt auf Polling zurück.
       [status, payload] = [404, { message: "Realtime im Mock nicht verfügbar (Polling aktiv)" }];

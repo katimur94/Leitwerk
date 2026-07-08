@@ -219,6 +219,58 @@ function answerFor(prompt) {
     };
   }
 
+  // summarize_meeting (Etappe 4)
+  if (prompt.includes("fasst ein Meeting zusammen")) {
+    return {
+      protocol_md:
+        "## Baubesprechung\n\n- Terminplan besprochen, Gerüstbau wird vorgezogen.\n" +
+        "- Materialbestellung bis Freitag klären.\n- Nächster Termin in zwei Wochen. (Mock)",
+      decisions: ["Gerüstbau wird vorgezogen", "Materialbestellung bis Freitag klären"],
+      open_questions: ["Wer koordiniert die Anlieferung?"],
+      tasks: [
+        { title: "Gerüstbauer beauftragen", assignee_hint: "Timur", due_at: null },
+        { title: "Material bis Freitag bestellen", assignee_hint: null, due_at: null },
+      ],
+    };
+  }
+
+  // knowledge_distill (Etappe 4)
+  if (prompt.includes("destillierst DAUERHAFTES")) {
+    const hay = prompt.toLowerCase();
+    const facts = [];
+    if (hay.includes("vertragsunterlagen") || hay.includes("auftrag")) {
+      facts.push({
+        fact: "Stadtwerke bestätigen Aufträge schriftlich und erwarten die Vertragsunterlagen per Post.",
+        category: "kunde",
+        confidence: 0.86,
+      });
+    }
+    if (facts.length === 0) {
+      facts.push({
+        fact: "Kunden aus dem Bauumfeld erwarten Rückmeldungen bis Ende der Woche.",
+        category: "prozess",
+        confidence: 0.8,
+      });
+    }
+    return { facts };
+  }
+
+  // build_style_profile (Etappe 4)
+  if (prompt.includes("analysierst den Schreibstil")) {
+    const count = (prompt.match(/--- Mail \d+ ---/g) || []).length;
+    return {
+      profile: {
+        greeting: "Guten Tag / Hallo",
+        closing: "Mit freundlichen Grüßen",
+        tone: "freundlich, sachlich, knapp",
+        avg_length: "mittel",
+        phrases: ["gern", "melde mich", "anbei"],
+        language: "de",
+      },
+      sample_count: count,
+    };
+  }
+
   // thread_summary
   if (prompt.includes("Fasse den folgenden E-Mail-Thread")) {
     return {

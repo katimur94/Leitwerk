@@ -24,6 +24,7 @@ const CONFIG_DIR = join(ROOT, "tools/mock-server/tmp/runner-config");
 // Direkter Pfad (Shebang + Exec-Bit) — `spawn` ohne Shell kann keine
 // Kommandos mit Leerzeichen wie "node …/claude-mock.cjs" starten.
 const CLAUDE_MOCK = join(ROOT, "tools/mock-server/claude-mock.cjs");
+const WHISPER_MOCK = join(ROOT, "tools/mock-server/whisper-mock.cjs");
 
 const VIEWPORT = { width: 1440, height: 900 };
 const ACCENT = "#3D5AFE";
@@ -343,6 +344,7 @@ try {
   const runner = startProcess(["apps/runner/dist/index.js", "start"], {
     LEITWERK_CLAUDE_BIN: CLAUDE_MOCK,
     LEITWERK_GMAIL_API_URL: "http://127.0.0.1:54321/gmail/v1/users/me",
+    LEITWERK_WHISPER_BIN: WHISPER_MOCK, // Etappe 4: lokale Transkription (Mock)
   });
   children.push(runner.child);
   await waitFor(() => runner.out().includes("Leitwerk-Runner gestartet"), 15_000, "Runner-Start");
@@ -535,7 +537,7 @@ try {
   await page.waitForSelector("svg circle");
   await capture("automationen", [
     { at: 'li:has-text("Mails kategorisieren")', label: "TrustMeter: Trefferquote aus deinem Feedback" },
-    { at: 'p:has-text("Autonomie-Regler")', label: "Hochstufung (Stufe 1–4) kommt in Phase 4", side: "left" },
+    { at: 'input[type="range"]', label: "Autonomie-Regler 1–4 (Details in Etappe 4)", side: "left" },
   ]);
 
   // ---- 29 Vorgänge (Auto-Anlage durch die KI) ----
@@ -609,7 +611,106 @@ try {
   await page.click('button:has-text("Freigeben & senden")');
   await sleep(1000);
 
-  // ---- 34 Regel-Builder (Etappe 0.5) ----
+  // ---- 34 Autonomie-Regler + Hochstufen-Gate (Etappe 4) ----
+  await page.goto(`${BASE}/einstellungen/automationen`);
+  await page.waitForSelector('input[type="range"]');
+  // Versuch, eine unbewährte Automation auf Stufe 3 zu ziehen → Server lehnt ab.
+  // (Pfeiltasten lösen echte React-onChange-Events aus.)
+  const labelRow = page.locator('li:has-text("Mails kategorisieren")');
+  await labelRow.locator('input[type="range"]').focus();
+  await page.keyboard.press("ArrowRight"); // 1 → 2 (erlaubt)
+  await sleep(400);
+  await page.keyboard.press("ArrowRight"); // 2 → 3 (Gate greift)
+  await sleep(1000);
+  await capture("automationen-regler", [
+    { at: 'h1:has-text("Automationen")', label: "Autonomie-Regler 1–4 pro Automation" },
+    { at: labelRow.locator('input[type="range"]').first(), label: "Hochstufen prüft der Server (set_autonomy_level)", side: "left" },
+    { at: ':text("Trefferquote")', label: "Stufe 3/4 erst ab nachgewiesener Trefferquote" },
+  ]);
+
+  // ---- 35 Halte-Zone: HoldBanner + Stopp (Etappe 4) ----
+  await page.goto(`${BASE}/`);
+  await waitFor(async () => (await page.locator(':text("geht raus in")').count()) > 0, 15_000, "HoldBanner");
+  await capture("halte-zone", [
+    { at: ':text("geht raus in")', label: "Stufe-3-Aktion in der Halte-Zone — mit Countdown" },
+    { at: 'button:has-text("Stoppen")', label: "Ein Klick stoppt vor dem Versand", side: "left" },
+  ]);
+  await page.click('button:has-text("Stoppen")');
+  await sleep(1000);
+
+  // ---- 36 Notizen (Etappe 4) ----
+  await page.goto(`${BASE}/notizen`);
+  await page.waitForSelector("#note-body");
+  await page.fill("#note-title", "Absprache Firma Zeta");
+  await page.fill("#note-body", "Gewährleistung bei Firma Zeta läuft bis Ende 2027. Ansprechpartner: Herr Kern.");
+  await capture("notizen", [
+    { at: 'h1:has-text("Notizen")', label: "Gedächtnis der Firma: Notizen (auch als Sprachnotiz)" },
+    { at: "#note-body", label: "Markdown; Sprachnotiz → Whisper LOKAL im Runner" },
+    { at: 'button:has-text("Notiz anlegen")', label: "Anlegen", side: "left" },
+  ]);
+  await page.click('button:has-text("Notiz anlegen")');
+  await page.waitForSelector('li:has-text("Absprache Firma Zeta"), p:has-text("Absprache Firma Zeta")');
+
+  // ---- 37 Wissen: destillierte Fakten prüfen (Etappe 4) ----
+  await page.click('button:has-text("Wissen")');
+  await waitFor(async () => {
+    await sleep(2000);
+    return (await page.locator('button:has-text("Bestätigen")').count()) > 0;
+  }, 120_000, "Destillierte Wissens-Vorschläge (knowledge_distill)");
+  await capture("wissen", [
+    { at: 'span:has-text("Vorschlag")', label: "Violett = von der KI destilliert (mit Konfidenz)" },
+    { at: 'button:has-text("Bestätigen")', label: "Bestätigen übernimmt den Fakt ins Firmenwissen", side: "left" },
+    { at: 'button:has-text("Ablehnen")', label: "Ablehnen verwirft (kein Wiedervorschlag)", side: "left" },
+  ]);
+  await page.click('button:has-text("Bestätigen")');
+  await sleep(800);
+
+  // ---- 38 Meetings: Audio → Protokoll (Etappe 4) ----
+  await page.goto(`${BASE}/meetings`);
+  await page.waitForSelector("#meeting-title");
+  await page.fill("#meeting-title", "Baubesprechung KW 28");
+  // kleine Dummy-Audiodatei hochladen (Inhalt egal — Whisper-Mock ist deterministisch)
+  await page.setInputFiles("#meeting-audio", {
+    name: "baubesprechung.webm",
+    mimeType: "audio/webm",
+    buffer: Buffer.from("RIFF....mock-audio....", "utf8"),
+  });
+  await waitFor(async () => {
+    await sleep(2000);
+    return (await page.locator('button:has-text("Protokoll fertig"), span:has-text("Protokoll fertig")').count()) > 0;
+  }, 120_000, "Meeting transkribiert + zusammengefasst");
+  await page.click('button:has-text("Baubesprechung KW 28")');
+  await page.waitForSelector('span:has-text("KI-Protokoll")');
+  await capture("meetings", [
+    { at: 'span:has-text("KI-Protokoll")', label: "Whisper (lokal) → KI-Protokoll — Audio verlässt die Org nie" },
+    { at: 'h4:has-text("Entscheidungen")', label: "Entscheidungen + offene Fragen strukturiert", side: "left" },
+  ]);
+
+  // ---- 39 Kombinierte Suche (Volltext + semantisch, Etappe 4) ----
+  await page.goto(`${BASE}/`);
+  await page.waitForSelector("nav"); // App-Shell gemountet → CommandBar-Listener aktiv
+  await page.locator("main").click({ position: { x: 20, y: 20 } });
+  await sleep(400);
+  await waitFor(async () => {
+    await page.keyboard.press("Control+KeyK");
+    await sleep(300);
+    return (await page.locator('input[placeholder*="Suchen"]').count()) > 0;
+  }, 15_000, "CommandBar öffnen");
+  await page.fill('input[placeholder*="Suchen"]', "Gewährleistung Zeta");
+  await waitFor(async () => (await page.locator('button:has-text("Semantisch suchen")').count()) > 0, 8000, "Suchleiste");
+  await page.click('button:has-text("Semantisch suchen")');
+  await waitFor(async () => {
+    await sleep(1500);
+    return (await page.locator('span:has-text("semantisch")').count()) > 0 ||
+      (await page.locator(':text("Semantik aktiv")').count()) > 0;
+  }, 30_000, "Semantische Treffer");
+  await capture("suche", [
+    { at: 'input[placeholder*="Suchen"]', label: "Ein Feld über Mails, Vorgänge, Notizen, Wissen …" },
+    { at: ':text("Semantik aktiv"), button:has-text("Semantisch")', label: "Semantik: Runner rechnet das Embedding LOKAL", side: "left" },
+  ]);
+  await page.keyboard.press("Escape");
+
+  // ---- 40 Regel-Builder (Etappe 0.5) ----
   await page.goto(`${BASE}/einstellungen/regeln`);
   await page.waitForSelector('h3:has-text("Neue Regel")');
   await page.fill("#rule-name", "Rechnungen sofort melden");
@@ -630,7 +731,7 @@ try {
     { at: 'li:has-text("Rechnungen sofort melden")', label: "Regel aktiv — pausieren oder löschen jederzeit" },
   ]);
 
-  // ---- 36 Dark Mode ----
+  // ---- 42 Dark Mode ----
   await page.click('nav button[title="Design wechseln"]');
   await sleep(400);
   await capture("dark-mode", [
