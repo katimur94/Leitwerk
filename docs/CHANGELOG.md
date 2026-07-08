@@ -1,5 +1,57 @@
 # Changelog
 
+## Etappe 5 — Team & Ausbau (2026-07-08)
+
+Kompletter Phase-5-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `022_p5_team_calendar.sql`):
+
+- **Geteilte Postfächer:** Thread-Zuweisung an Mitglieder (`mail_threads.assignee_id`
+  + RPC `assign_thread` mit Member-Check, Benachrichtigung, Case-Event). Interne
+  **Kommentare mit @Mentions** (`thread_comments` + Trigger `on_thread_comment` →
+  `notify_user`, kind='mention'); UI-Panel im Thread löst @Name zu user_ids auf.
+  Kein Weiterleiten-Chaos (MASTERPLAN §4 Y).
+- **Kalender:** Connector `sync_calendar` (Google Calendar, kurzlebiges Token aus dem
+  Vault über die neue Edge Function **`calendar-sync`**, Delta per syncToken, All-Day-
+  fähig), Event↔Vorgang-Verknüpfung. Skill **`calendar_briefing`** erzeugt vor baldigen
+  Terminen (≤24h) automatisch ein Kontext-Briefing (`ai_briefing`) aus offenen Vorgängen
+  und letzten Mails der Teilnehmer. Skill **`suggest_slots`** berechnet serverseitig
+  3 freie Werktags-Slots (kollisionsgeprüft) und entwirft eine Terminvorschlags-Antwort.
+- **IMAP/SMTP-Connector** als Gmail-Alternative: testbare RFC822-Normalisierung
+  (`imapMessageToIngest`) speist dieselbe `/ingest`-Pipeline wie Gmail (Transport pluggbar).
+- **Fristenkalender:** wiederkehrende Pflichten als `tasks` mit `recurrence` — im
+  Kalender-Modul gelistet (kein neues Schema).
+- **Wochenreport:** Skill `weekly_report` (freitags) → `briefings` kind='weekly' +
+  Benachrichtigung; „Heute“ zeigt den Wochenrückblick als eigene Karte.
+- **Datenexport (kein Lock-in):** Edge Function **`export-org`** legt einen JSON-Snapshot
+  aller org-scoped Tabellen im Bucket `exports` ab (signierte URL); nur Owner/Admin.
+- **Serverlogik:** `apply_job_result_p5` als **zusätzlicher** Trigger (lässt v4 aus 021
+  unangetastet): `calendar_briefing`, `suggest_slots`, `weekly_report`.
+- **Mock + E2E:** Mock spiegelt alle 022-RPCs/Trigger (assign_thread,
+  thread_comments-@Mentions, calendar-sync, export-org, apply_job_result_p5), seedet
+  einen verbundenen Kalender mit baldigem Termin. E2E auf 46 Screenshots erweitert
+  (Zuweisung + Kommentar, Kalender-Briefing, Datenexport, Wochenreport).
+
+### Manuelle Schritte für den Betreiber (Deploy Etappe 5)
+
+1. **Migration einspielen:** `supabase db push` (neu: `022_p5_team_calendar.sql`).
+2. **Google-OAuth-Scope für Kalender** ergänzen (`calendar.readonly` bzw. `calendar`)
+   und pro Nutzer ein `calendar_accounts`-Konto anlegen (gleicher Vault-Refresh-Token
+   wie Gmail möglich). Siehe `tutorials/02_google_oauth.md`.
+3. **Edge Functions deployen:**
+   `supabase functions deploy calendar-sync export-org build-job-context`.
+4. **pg_cron-Jobs anlegen** (SQL-Editor):
+   ```sql
+   select cron.schedule('weekly-report', '0 15 * * 5', $$select public.enqueue_org_jobs('weekly_report', 8)$$);
+   -- Kalender-Sync pro verbundenem Konto (Beispiel; enqueue je calendar_account):
+   -- select cron.schedule('calendar-sync', '*/10 * * * *', $$
+   --   insert into public.agent_jobs (org_id, job_type, priority, payload)
+   --   select org_id, 'sync_calendar', 6, jsonb_build_object('account_id', id)
+   --     from public.calendar_accounts$$);
+   ```
+5. **PWA neu bauen/deployen:** `pnpm --filter @leitwerk/pwa build`.
+6. **Runner aktualisieren** (alle Nutzer): `npm update -g leitwerk-runner`
+   (neue Skills `sync_calendar`, `calendar_briefing`, `suggest_slots`, `weekly_report`;
+   IMAP-Connector optional).
+
 ## Etappe 4 — Autonomie & Wissen (2026-07-08)
 
 Kompletter Phase-4-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `021_p4_autonomy_knowledge.sql`):

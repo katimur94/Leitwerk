@@ -1,6 +1,6 @@
-# Leitwerk — Test-Tutorial (lokal, ohne Supabase) · Phasen 0–3
+# Leitwerk — Test-Tutorial (lokal, ohne Supabase) · Phasen 0–5
 
-Dieses Tutorial zeigt **jedes Feature der Phasen 0 bis 3** mit annotierten Screenshots — aufgenommen
+Dieses Tutorial zeigt **jedes Feature der Phasen 0 bis 5** mit annotierten Screenshots — aufgenommen
 gegen die **lokale Mock-Umgebung**, die komplett ohne Supabase/Docker läuft. Alle
 Screenshots stammen aus einem automatisierten Ende-zu-Ende-Lauf
 (`tools/e2e-tutorial/run.mjs`) und lassen sich jederzeit reproduzieren.
@@ -448,9 +448,47 @@ startet einen interaktiven `semantic_search`-Job — das Query-Embedding rechnet
 Hash-Fallback), nie der Client. Die eigentliche Vektor-Ähnlichkeit macht die DB
 (`search_combined` + `pgvector`); semantische Treffer tragen ein violettes Badge.
 
-## 40 · Regel-Builder (Einstellungen → Regeln)
+## 40 · Geteiltes Postfach: Zuweisung & interne Kommentare (Etappe 5)
 
-![Regel-Builder](img/40-regel-builder.png)
+![Zuweisung & Kommentar](img/40-zuweisung-kommentar.png)
+
+**(1)** In geteilten Postfächern lässt sich jeder Thread einem Mitglied **zuweisen**
+(RPC `assign_thread`, serverseitig geprüft) — die Person wird benachrichtigt.
+**(2)** Interne **Kommentare** klären Zuständigkeiten direkt am Thread; **(3)** eine
+`@Name`-Erwähnung löst der Client zu einer Nutzer-ID auf, der Trigger `on_thread_comment`
+schickt eine Benachrichtigung (kind='mention'). Kein Weiterleiten-Chaos (MASTERPLAN §4 Y).
+
+## 41 · Kalender mit KI-Kontext-Briefing
+
+![Kalender](img/41-kalender.png)
+
+**(1)** Termine kommen über den Runner-Sync (`sync_calendar`, kurzlebiges Token aus dem
+Vault) aus dem Google-Kalender und sind mit Vorgängen verknüpfbar. **(2)** Vor baldigen
+Terminen erzeugt `calendar_briefing` automatisch ein **Kontext-Briefing** (offene
+Vorgänge, letzte Mails der Teilnehmer) — violett, weil KI. **(3)** Der Fristenkalender
+listet wiederkehrende Pflichten (Aufgaben mit Wiederholung). Terminvorschläge
+(`suggest_slots`) berechnen 3 freie Werktags-Slots als Antwort-Entwurf.
+
+## 42 · Datenexport (kein Lock-in)
+
+![Datenexport](img/42-datenexport.png)
+
+**(1)** Owner/Admin exportieren die komplette Organisation als JSON-Snapshot
+(Edge Function `export-org`, Ablage im Bucket `exports`, signierte URL). **(2)** Alle
+org-scoped Tabellen sind enthalten; Binärdateien bleiben per `storage_path` referenziert.
+Viewer und Nicht-Mitglieder werden serverseitig abgelehnt.
+
+## 43 · Wochenreport
+
+![Wochenreport](img/43-wochenreport.png)
+
+**(1)** Freitags fasst `weekly_report` die Woche zusammen (bearbeitete Mails, erledigte
+Aufgaben, versendete/bezahlte Rechnungen, Angebots-Pipeline, KI-Trefferquote) →
+`briefings` kind='weekly'. „Heute“ zeigt den Rückblick als eigene Karte (violett = KI).
+
+## 44 · Regel-Builder (Einstellungen → Regeln)
+
+![Regel-Builder](img/44-regel-builder.png)
 
 Die Regel-Engine light (Etappe 0.5): **(1)** Jede Regel folgt dem Muster „Wenn
 *Ereignis* und *Bedingungen*, dann *Aktion*“. **(2)** Ereignisse wie `mail_received`,
@@ -459,17 +497,17 @@ Modulen ausgelöst. **(3)** Bedingungen prüfen Felder der Entity (UND-verknüpf
 von „ist gleich“ bis „fehlt“). **(4)** Ausgewertet wird serverseitig durch die
 Postgres-Funktion `evaluate_org_rules` — Aktionen: Benachrichtigung, Aufgabe oder KI-Job.
 
-## 41 · Regel aktiv
+## 45 · Regel aktiv
 
-![Regel-Liste](img/41-regel-liste.png)
+![Regel-Liste](img/45-regel-liste.png)
 
 **(1)** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede Ausführung
 landet im Audit-Log (`rule.executed`). Seit Etappe 1 feuern `mail_received` und
 `mail_sent` bei jeder synchronisierten bzw. gesendeten Nachricht durch die Engine.
 
-## 42 · Dark Mode
+## 46 · Dark Mode
 
-![Dark Mode](img/42-dark-mode.png)
+![Dark Mode](img/46-dark-mode.png)
 
 **(1)** Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um
 (alle Design-Tokens aus `DESIGN.md`, inklusive angepasster Marken- und KI-Farben).
@@ -477,7 +515,7 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ---
 
-## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1, 2, 3 und 4)
+## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1, 2, 3, 4 und 5)
 
 1. Registrierung → Org-Anlage → Onboarding-Wizard mit Stammdaten aus `org_profile` ✓
 2. Runner-Pairing über Pairing-Code + Token-Hash, gehärtet mit Rate-Limit,

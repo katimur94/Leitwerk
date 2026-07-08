@@ -77,7 +77,7 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
 [lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 42 Bildern:
+mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 46 Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
 ### Anmelden & Registrieren
@@ -234,6 +234,21 @@ mit Entscheidungen und Aufgaben:
 
 ![Meetings](docs/testing-tutorial/img/38-meetings.png)
 
+### Geteilte Postfächer, Kalender & Wochenreport (Etappe 5)
+
+Threads lassen sich einem Mitglied zuweisen und intern kommentieren (mit @Mentions) —
+ohne Weiterleiten-Chaos:
+
+![Zuweisung & Kommentar](docs/testing-tutorial/img/40-zuweisung-kommentar.png)
+
+Der Kalender zeigt Termine (Google-Sync über den Runner) mit **automatischem
+KI-Kontext-Briefing** vor jedem Termin, dazu Fristenkalender und Datenexport:
+
+![Kalender](docs/testing-tutorial/img/41-kalender.png)
+
+Und freitags fasst der Wochenreport die Woche zusammen (Mails, Aufgaben, Rechnungen,
+Pipeline). Komplett-Export der Org-Daten als JSON — kein Lock-in.
+
 ### App-Shell, CommandBar & Dark Mode
 
 Icon-Rail (56 px) → Kontext-Sidebar → Hauptfläche, alle Module navigierbar (kein Feature
@@ -246,7 +261,7 @@ sofort, semantisch (`pgvector`) auf Knopfdruck — das Query-Embedding rechnet d
 Vollwertiges dunkles Theme mit einem Klick, alle Design-Tokens aus
 [docs/DESIGN.md](docs/DESIGN.md):
 
-![Dark Mode](docs/testing-tutorial/img/42-dark-mode.png)
+![Dark Mode](docs/testing-tutorial/img/46-dark-mode.png)
 
 ---
 
@@ -263,7 +278,7 @@ Nutzbarem. Fertige Prompts pro Phase: [docs/ROADMAP_PROMPTS.md](docs/ROADMAP_PRO
 | **P2 — Aufgaben & Briefing** | Aufgaben-Compiler (`extract_commitments`), Follow-up-Engine, Nacht-Wächter (`gap_scan`), Morgen-Briefing, Web-Push | ✅ **fertig** |
 | **P3 — Finanzen** | Eingangsrechnungs-Erfassung + Prüf-Workflow, Angebote/Rechnungen inkl. **XRechnung-XML** (EN 16931), Mahnwesen, Nummernkreise | ✅ **fertig** |
 | **P4 — Autonomie & Wissen** | Autonomie-Regler-UI mit Trefferquoten (TrustMeter), serverseitiges Hochstufen-Gate, Stufe-3-Halte-Zone, Notizen, `knowledge_distill`, semantische Suche (pgvector), Meetings (Whisper lokal) | ✅ **fertig** |
-| **P5 — Team & Papierkram** | Geteilte Postfächer, Kommentare/@Zuweisungen, Fristenkalender, IMAP-Fallback, Kalender-Sync, Wochenreport | geplant |
+| **P5 — Team & Papierkram** | Geteilte Postfächer, Kommentare/@Zuweisungen, Fristenkalender, IMAP-Fallback, Kalender-Sync, Wochenreport | ✅ **fertig** |
 | **P6 — Komplett-Büro** | Zeiterfassung + Abwesenheiten, Banking-Sync + Zahlungsabgleich, DATEV-Export, Anrufprotokolle, Vertragsregister mit Kündigungs-Wächter | geplant |
 | **P7 — Produktisierung** | Onboarding-Polish, Landing Page, Preismodell („keine KI-Kosten beim Anbieter“), gehosteter Runner als Option, Pen-Test | offen |
 
@@ -278,7 +293,7 @@ steht in [docs/MASTERPLAN.md](docs/MASTERPLAN.md) §5.
 | `apps/runner` | `leitwerk-runner` — Node-20-CLI-Daemon (Pairing, Poll-Loop, Skills, Provider-Adapter) |
 | `packages/shared` | Zod-Schemas, Job-/Broker-Typen, Konstanten, Geld-Utils (Cent-Integer, de-DE) |
 | `packages/ui` | Design-System nach `docs/DESIGN.md` (Tokens Light/Dark, AiBadge, EmptyState, …) |
-| `supabase/` | 20 Migrationen + Edge Functions (Deno): `runner-broker`, `build-job-context`, `oauth-gmail`, `mail-sync`, `send-mail`, `send-push`, `export-xrechnung` |
+| `supabase/` | 22 Migrationen + Edge Functions (Deno): `runner-broker`, `build-job-context`, `oauth-gmail`, `mail-sync`, `calendar-sync`, `send-mail`, `send-push`, `export-xrechnung`, `export-org` |
 | `migrations/` | **Verbindliche Datenmodell-Wahrheit** — Code folgt dem Schema, nicht umgekehrt |
 | `tools/mock-server` | Lokales Mock-Backend (ersetzt Supabase zum Testen) + Mock-Claude-CLI |
 | `tools/e2e-tutorial` | Playwright-Lauf: komplette User-Journey + annotierte Screenshots |
