@@ -1,0 +1,46 @@
+@import "tailwindcss";
+@import "@leitwerk/ui/tokens.css";
+
+/* UI-Paket wird als Quelle mitkompiliert — Tailwind soll dessen Klassen sehen */
+@source "../../../packages/ui/src";
+
+@theme inline {
+  --color-lw-bg: var(--lw-bg);
+  --color-lw-surface: var(--lw-surface);
+  --color-lw-surface-2: var(--lw-surface-2);
+  --color-lw-border: var(--lw-border);
+  --color-lw-border-strong: var(--lw-border-strong);
+  --color-lw-ink: var(--lw-ink);
+  --color-lw-ink-soft: var(--lw-ink-soft);
+  --color-lw-ink-faint: var(--lw-ink-faint);
+  --color-lw-brand: var(--lw-brand);
+  --color-lw-brand-hover: var(--lw-brand-hover);
+  --color-lw-accent: var(--lw-accent);
+  --color-lw-success: var(--lw-success);
+  --color-lw-warning: var(--lw-warning);
+  --color-lw-danger: var(--lw-danger);
+  --color-lw-ai: var(--lw-ai);
+
+  --font-sans: "Inter Variable", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--lw-bg);
+  color: var(--lw-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Zahlen in Tabellen/Beträgen: tabular-nums (DESIGN.md) */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,90 @@
+// Deutsch ist Default; Schlüssel englisch (CLAUDE.md Regel 8).
+// Weitere Sprachen: gleiche Schlüssel in en.ts etc. ergänzen.
+export const de: Record<string, string> = {
+  "app.name": "Leitwerk",
+  "app.tagline": "Das Leitwerk für dein Büro.",
+
+  "common.save": "Speichern",
+  "common.next": "Weiter",
+  "common.back": "Zurück",
+  "common.skip": "Überspringen",
+  "common.retry": "Erneut versuchen",
+  "common.loading": "Wird geladen …",
+  "common.error": "Da ist etwas schiefgelaufen.",
+  "common.offline": "Offline — Änderungen werden synchronisiert, sobald du wieder verbunden bist.",
+  "common.comingSoon": "Dieses Modul kommt in einer späteren Phase.",
+
+  "auth.login": "Anmelden",
+  "auth.register": "Konto erstellen",
+  "auth.email": "E-Mail-Adresse",
+  "auth.password": "Passwort",
+  "auth.displayName": "Dein Name",
+  "auth.loginWithGoogle": "Mit Google anmelden",
+  "auth.noAccount": "Noch kein Konto?",
+  "auth.hasAccount": "Schon ein Konto?",
+  "auth.logout": "Abmelden",
+
+  "nav.today": "Heute",
+  "nav.inbox": "Posteingang",
+  "nav.cases": "Vorgänge",
+  "nav.tasks": "Aufgaben",
+  "nav.finance": "Finanzen",
+  "nav.settings": "Einstellungen",
+
+  "commandbar.placeholder": "Suchen oder Befehl eingeben …",
+  "commandbar.empty": "Keine Treffer.",
+
+  "onboarding.title": "Leitwerk einrichten",
+  "onboarding.createOrg.title": "Organisation anlegen",
+  "onboarding.createOrg.name": "Name der Organisation",
+  "onboarding.createOrg.submit": "Organisation anlegen",
+  "onboarding.company.title": "Firmen-Stammdaten",
+  "onboarding.company.hint": "Diese Daten erscheinen später auf Angeboten, Rechnungen und in Signaturen.",
+  "onboarding.mail.title": "Postfach verbinden",
+  "onboarding.mail.hint": "Gmail-Anbindung kommt in Phase 1 — du kannst diesen Schritt überspringen.",
+  "onboarding.runner.title": "Runner verbinden",
+  "onboarding.numberRanges.title": "Nummernkreise prüfen",
+  "onboarding.numberRanges.hint": "Diese Nummernkreise wurden automatisch angelegt. Sie lassen sich später in den Einstellungen anpassen.",
+  "onboarding.done.title": "Fertig!",
+  "onboarding.done.hint": "Leitwerk ist eingerichtet. Ab Phase 1 landet hier dein E-Mail-Hub.",
+  "onboarding.done.cta": "Zur App",
+
+  "runner.title": "Runner",
+  "runner.subtitle": "Dein lokaler KI-Agent — läuft mit deinem eigenen Claude-Abo.",
+  "runner.pair.title": "Runner verbinden",
+  "runner.pair.step1": "Installiere und starte den Runner auf deinem Rechner:",
+  "runner.pair.step2": "Gib den angezeigten Pairing-Code hier ein:",
+  "runner.pair.codeLabel": "Pairing-Code",
+  "runner.pair.submit": "Verbinden",
+  "runner.pair.waiting": "Code aktiv — warte darauf, dass der Runner ihn einlöst … (max. 10 Minuten)",
+  "runner.pair.invalidCode": "Bitte gib den 8-stelligen Code ein (Bindestrich optional).",
+  "runner.list.title": "Verbundene Runner",
+  "runner.list.empty.title": "Noch kein Runner verbunden",
+  "runner.list.empty.description": "Der Runner erledigt alle KI-Arbeit lokal auf deinem Rechner — mit deinem eigenen Claude-Max-Abo.",
+  "runner.list.lastHeartbeat": "Letzter Heartbeat",
+  "runner.offlineHint": "Kein Runner online — KI-Jobs bleiben in der Warteschlange, bis ein Runner verfügbar ist. Der Rest der App funktioniert normal.",
+
+  "testjob.title": "Test-Job (echo)",
+  "testjob.hint": "Schickt einen Testtext durch die komplette Kette: Queue → Runner → KI → Ergebnis.",
+  "testjob.inputLabel": "Testtext",
+  "testjob.inputPlaceholder": "z. B. Sag Hallo, Leitwerk!",
+  "testjob.submit": "Test-Job senden",
+  "testjob.jobs.title": "Letzte Jobs",
+  "testjob.jobs.empty": "Noch keine Jobs — sende oben deinen ersten Test-Job.",
+
+  "job.status.queued": "Wartet",
+  "job.status.claimed": "Übernommen",
+  "job.status.running": "Läuft",
+  "job.status.done": "Erledigt",
+  "job.status.failed": "Fehlgeschlagen",
+  "job.status.cancelled": "Abgebrochen",
+  "job.status.expired": "Abgelaufen",
+
+  "today.empty.title": "Noch kein Morgen-Briefing",
+  "today.empty.description": "Der Nacht-Wächter und dein Briefing kommen in Phase 2. Bis dahin: verbinde deinen Runner und teste die KI-Kette.",
+  "today.empty.cta": "Zu den Runner-Einstellungen",
+};
+
+export function t(key: string): string {
+  return de[key] ?? key;
+}
