@@ -9,5 +9,4 @@ export * from "./watchdog";
 export * from "./finance";
 export * from "./knowledge";
 export * from "./team";
-export * from "./datev";
 export * from "./office";

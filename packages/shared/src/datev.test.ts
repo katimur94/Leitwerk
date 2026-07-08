@@ -2,7 +2,12 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildDatevExtf, datevTotals, type DatevBooking, type DatevExtfParams } from "./datev";
+import {
+  buildDatevExtf,
+  datevTotals,
+  type DatevBooking,
+  type DatevExtfParams,
+} from "../../../supabase/functions/_shared/datev";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const goldenPath = join(here, "__fixtures__", "datev-extf-golden.csv");

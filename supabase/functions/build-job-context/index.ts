@@ -875,6 +875,170 @@ async function buildContext(
       };
     }
 
+    // P6: Zeitvorschläge aus Kalender-/Vorgangs-Signalen
+    case "time_suggest": {
+      const userId = String(job.payload.user_id ?? "");
+      const forDate = new Date().toISOString().slice(0, 10);
+      const { data: events } = await db
+        .from("calendar_events")
+        .select("title, starts_at, ends_at, case_id")
+        .eq("org_id", job.org_id)
+        .gte("starts_at", `${forDate}T00:00:00Z`)
+        .lte("starts_at", `${forDate}T23:59:59Z`)
+        .limit(20);
+      const signals = (events ?? []).map((e) => ({
+        kind: "Termin",
+        case_id: e.case_id,
+        detail: e.title ?? "",
+        minutes: Math.max(15, Math.round((Date.parse(e.ends_at) - Date.parse(e.starts_at)) / 60000)),
+      }));
+      return {
+        jobId: job.id, jobType: "time_suggest", locale: "de-DE",
+        user_id: userId, for_date: forDate, signals,
+      };
+    }
+
+    // P6: Zahlungsabgleich — offene Umsätze ↔ offene Rechnungen
+    case "payment_match": {
+      const { data: tx } = await db
+        .from("bank_transactions")
+        .select("id, amount, booked_on, counterpart_name, purpose")
+        .eq("org_id", job.org_id)
+        .eq("match_status", "unmatched")
+        .order("booked_on", { ascending: false })
+        .limit(50);
+      const { data: out } = await db
+        .from("invoices_out")
+        .select("id, invoice_number, gross_amount, companies(name)")
+        .eq("org_id", job.org_id)
+        .in("status", ["sent", "overdue", "partially_paid"])
+        .limit(50);
+      const { data: inv } = await db
+        .from("invoices_in")
+        .select("id, invoice_number, gross_amount")
+        .eq("org_id", job.org_id)
+        .in("status", ["approved"])
+        .limit(50);
+      return {
+        jobId: job.id, jobType: "payment_match", locale: "de-DE",
+        transactions: (tx ?? []).map((t) => ({
+          transaction_id: t.id, amount: Number(t.amount), booked_on: t.booked_on,
+          counterpart_name: t.counterpart_name ?? "", purpose: t.purpose ?? "",
+        })),
+        open_invoices_out: (out ?? []).map((i) => ({
+          invoice_out_id: i.id, number: i.invoice_number, gross: Number(i.gross_amount),
+          company: (i.companies as { name?: string } | null)?.name ?? "",
+        })),
+        open_invoices_in: (inv ?? []).map((i) => ({
+          invoice_in_id: i.id, number: i.invoice_number ?? "", gross: Number(i.gross_amount ?? 0), issuer: "",
+        })),
+      };
+    }
+
+    // P6: Kontierungsvorschlag für eine Eingangsrechnung
+    case "account_assign": {
+      const { data: invoice } = await db
+        .from("invoices_in")
+        .select("id, org_id, gross_amount, companies(name)")
+        .eq("id", String(job.payload.invoice_in_id ?? ""))
+        .maybeSingle();
+      if (!invoice || invoice.org_id !== job.org_id) return null;
+      const { data: settings } = await db
+        .from("accounting_settings")
+        .select("chart_of_accounts, acct_expense_default")
+        .eq("org_id", job.org_id)
+        .maybeSingle();
+      return {
+        jobId: job.id, jobType: "account_assign", locale: "de-DE",
+        invoice_in_id: invoice.id,
+        issuer: (invoice.companies as { name?: string } | null)?.name ?? "",
+        gross_amount: invoice.gross_amount ? Number(invoice.gross_amount) : null,
+        chart_of_accounts: settings?.chart_of_accounts ?? "SKR03",
+        known_accounts: [
+          { account: settings?.acct_expense_default ?? "4980", label: "Sonstiger Aufwand" },
+          { account: "4930", label: "Bürobedarf" },
+          { account: "4210", label: "Miete" },
+          { account: "4360", label: "Versicherungen" },
+        ],
+      };
+    }
+
+    // P6: Anruf transkribieren (lokal via Whisper)
+    case "transcribe_call": {
+      const { data: call } = await db
+        .from("call_logs")
+        .select("id, org_id, audio_storage_path")
+        .eq("id", String(job.payload.call_id ?? ""))
+        .maybeSingle();
+      if (!call || call.org_id !== job.org_id || !call.audio_storage_path) return null;
+      if (!String(call.audio_storage_path).startsWith(`org/${job.org_id}/`)) return null;
+      return {
+        jobId: job.id, jobType: "transcribe_call", locale: "de-DE",
+        call_id: call.id, audio_storage_path: call.audio_storage_path,
+      };
+    }
+
+    // P6: Anruf zusammenfassen
+    case "summarize_call": {
+      const { data: call } = await db
+        .from("call_logs")
+        .select("id, org_id, transcript, phone_number, case_id, contacts(first_name, last_name), cases(case_number)")
+        .eq("id", String(job.payload.call_id ?? ""))
+        .maybeSingle();
+      if (!call || call.org_id !== job.org_id) return null;
+      const contact = call.contacts as { first_name?: string; last_name?: string } | null;
+      return {
+        jobId: job.id, jobType: "summarize_call", locale: "de-DE",
+        call: {
+          call_id: call.id,
+          counterpart: [contact?.first_name, contact?.last_name].filter(Boolean).join(" ") || (call.phone_number ?? ""),
+          case_number: (call.cases as { case_number?: string } | null)?.case_number ?? null,
+          transcript_excerpt: excerpt(call.transcript, 8000),
+        },
+      };
+    }
+
+    // P6: Vertragsdaten extrahieren
+    case "extract_contract": {
+      const { data: contract } = await db
+        .from("contracts")
+        .select("id, org_id, document_id, documents(ocr_text)")
+        .eq("id", String(job.payload.contract_id ?? ""))
+        .maybeSingle();
+      if (!contract || contract.org_id !== job.org_id) return null;
+      const docText = (contract.documents as { ocr_text?: string } | null)?.ocr_text
+        ?? String(job.payload.document_text ?? "");
+      return {
+        jobId: job.id, jobType: "extract_contract", locale: "de-DE",
+        today: new Date().toISOString().slice(0, 10),
+        contract_id: contract.id, document_text: excerpt(docText, 6000),
+      };
+    }
+
+    // P6: Kündigungsfristen-Wächter
+    case "contract_watch": {
+      const { data: contracts } = await db
+        .from("contracts")
+        .select("id, title, notice_deadline, yearly_cost, status")
+        .eq("org_id", job.org_id)
+        .in("status", ["active", "notice_given"])
+        .not("notice_deadline", "is", null)
+        .order("notice_deadline", { ascending: true })
+        .limit(100);
+      const now = Date.now();
+      return {
+        jobId: job.id, jobType: "contract_watch", locale: "de-DE",
+        today: new Date().toISOString().slice(0, 10),
+        contracts: (contracts ?? []).map((c) => ({
+          contract_id: c.id, title: c.title, notice_deadline: c.notice_deadline,
+          days_until_deadline: c.notice_deadline
+            ? Math.floor((Date.parse(c.notice_deadline) - now) / 86_400_000)
+            : null,
+          yearly_cost: c.yearly_cost ? Number(c.yearly_cost) : null,
+        })),
+      };
+    }
+
     // P1: Ein-Absatz-Zusammenfassung langer Threads
     case "thread_summary": {
       const { data: thread } = await db

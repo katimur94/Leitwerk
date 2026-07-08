@@ -69,3 +69,10 @@ verify_jwt = false
 # Runner-authentifiziert (Runner-Token statt JWT) — Etappe 5.
 [functions.calendar-sync]
 verify_jwt = false
+
+# export-org / export-datev prüfen Owner/Admin selbst via auth.getUser (Etappe 5/6).
+[functions.export-org]
+verify_jwt = false
+
+[functions.export-datev]
+verify_jwt = false
