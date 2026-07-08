@@ -484,6 +484,212 @@ async function buildContext(
       };
     }
 
+    // P4: Sprachnotiz transkribieren (lokal via Whisper)
+    case "transcribe_note": {
+      const { data: note } = await db
+        .from("notes")
+        .select("id, org_id")
+        .eq("id", String(job.payload.note_id ?? ""))
+        .maybeSingle();
+      if (!note || note.org_id !== job.org_id) return null;
+      const path = String(job.payload.audio_storage_path ?? "");
+      if (!path.startsWith(`org/${job.org_id}/`)) return null;
+      return {
+        jobId: job.id,
+        jobType: "transcribe_note",
+        locale: "de-DE",
+        note_id: note.id,
+        audio_storage_path: path,
+      };
+    }
+
+    // P4: Meeting-Audio transkribieren (lokal via whisper.cpp)
+    case "transcribe_meeting": {
+      const { data: meeting } = await db
+        .from("meetings")
+        .select("id, org_id, title, audio_storage_path")
+        .eq("id", String(job.payload.meeting_id ?? ""))
+        .maybeSingle();
+      if (!meeting || meeting.org_id !== job.org_id || !meeting.audio_storage_path) return null;
+      if (!String(meeting.audio_storage_path).startsWith(`org/${job.org_id}/`)) return null;
+      return {
+        jobId: job.id,
+        jobType: "transcribe_meeting",
+        locale: "de-DE",
+        meeting_id: meeting.id,
+        title: meeting.title ?? "",
+        audio_storage_path: meeting.audio_storage_path,
+      };
+    }
+
+    // P4: Protokoll + Entscheidungen + Aufgaben aus dem Transkript
+    case "summarize_meeting": {
+      const { data: meeting } = await db
+        .from("meetings")
+        .select("id, org_id, title, held_at, transcript, case_id, cases(case_number)")
+        .eq("id", String(job.payload.meeting_id ?? ""))
+        .maybeSingle();
+      if (!meeting || meeting.org_id !== job.org_id || !meeting.transcript) return null;
+      return {
+        jobId: job.id,
+        jobType: "summarize_meeting",
+        locale: "de-DE",
+        today: new Date().toISOString().slice(0, 10),
+        meeting: {
+          meeting_id: meeting.id,
+          title: meeting.title ?? "",
+          held_at: meeting.held_at,
+          case_number: (meeting.cases as { case_number?: string } | null)?.case_number ?? null,
+          transcript_excerpt: excerpt(meeting.transcript, 12000),
+        },
+      };
+    }
+
+    // P4: dauerhafte Fakten destillieren (Quellen der letzten 7 Tage)
+    case "knowledge_distill": {
+      const since = new Date(Date.now() - 7 * 86_400_000).toISOString();
+      const { data: messages } = await db
+        .from("mail_messages")
+        .select("id, subject, from_addr, body_text")
+        .eq("org_id", job.org_id)
+        .eq("direction", "inbound")
+        .gte("created_at", since)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      const { data: meetings } = await db
+        .from("meetings")
+        .select("id, title, protocol_md")
+        .eq("org_id", job.org_id)
+        .not("protocol_md", "is", null)
+        .gte("updated_at", since)
+        .limit(10);
+      const { data: known } = await db
+        .from("knowledge_items")
+        .select("fact")
+        .eq("org_id", job.org_id)
+        .neq("status", "rejected")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      return {
+        jobId: job.id,
+        jobType: "knowledge_distill",
+        locale: "de-DE",
+        today: new Date().toISOString().slice(0, 10),
+        sources: [
+          ...(messages ?? []).map((m) => ({
+            source_type: "mail_message",
+            source_id: m.id,
+            title: m.subject ?? "",
+            excerpt: excerpt(m.body_text, 800),
+            counterpart: (m.from_addr as Addr | null)?.email ?? "",
+          })),
+          ...(meetings ?? []).map((m) => ({
+            source_type: "meeting",
+            source_id: m.id,
+            title: m.title ?? "",
+            excerpt: excerpt(m.protocol_md, 800),
+            counterpart: "",
+          })),
+        ].slice(0, 40),
+        known_facts: (known ?? []).map((k) => k.fact),
+      };
+    }
+
+    // P4: Schreibstil aus den letzten gesendeten Mails
+    case "build_style_profile": {
+      const { data: account } = await db
+        .from("mail_accounts")
+        .select("id, org_id")
+        .eq("id", String(job.payload.account_id ?? ""))
+        .maybeSingle();
+      if (!account || account.org_id !== job.org_id) return null;
+      const { data: sent } = await db
+        .from("mail_messages")
+        .select("body_text")
+        .eq("account_id", account.id)
+        .eq("direction", "outbound")
+        .order("sent_at", { ascending: false })
+        .limit(20);
+      return {
+        jobId: job.id,
+        jobType: "build_style_profile",
+        locale: "de-DE",
+        account_id: account.id,
+        sent_samples: (sent ?? [])
+          .map((m) => excerpt(m.body_text, 600))
+          .filter((s) => s.length > 40),
+      };
+    }
+
+    // P4: Embedding-Backlog — noch nicht eingebettete Inhalte (max. 64)
+    case "embed_backlog": {
+      const pending: Array<{
+        entity_type: string;
+        entity_id: string;
+        chunk_index: number;
+        content: string;
+      }> = [];
+      const { data: embedded } = await db
+        .from("embeddings")
+        .select("entity_type, entity_id")
+        .eq("org_id", job.org_id)
+        .limit(5000);
+      const done = new Set((embedded ?? []).map((e) => `${e.entity_type}:${e.entity_id}`));
+      const push = (type: string, id: string, content: string) => {
+        if (pending.length >= 64 || !content.trim() || done.has(`${type}:${id}`)) return;
+        pending.push({ entity_type: type, entity_id: id, chunk_index: 0, content: content.slice(0, 2000) });
+      };
+      const { data: messages } = await db
+        .from("mail_messages")
+        .select("id, subject, body_text")
+        .eq("org_id", job.org_id)
+        .order("created_at", { ascending: false })
+        .limit(40);
+      for (const m of messages ?? []) push("mail_message", m.id, `${m.subject ?? ""}\n${m.body_text ?? ""}`);
+      const { data: notes } = await db
+        .from("notes")
+        .select("id, title, body_md")
+        .eq("org_id", job.org_id)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      for (const n of notes ?? []) push("note", n.id, `${n.title ?? ""}\n${n.body_md ?? ""}`);
+      const { data: knowledge } = await db
+        .from("knowledge_items")
+        .select("id, fact")
+        .eq("org_id", job.org_id)
+        .neq("status", "rejected")
+        .limit(30);
+      for (const k of knowledge ?? []) push("knowledge_item", k.id, k.fact);
+      const { data: docs } = await db
+        .from("documents")
+        .select("id, title, ocr_text")
+        .eq("org_id", job.org_id)
+        .not("ocr_text", "is", null)
+        .limit(20);
+      for (const d of docs ?? []) push("document", d.id, `${d.title ?? ""}\n${d.ocr_text ?? ""}`);
+      const { data: segments } = await db
+        .from("meeting_segments")
+        .select("id, content")
+        .eq("org_id", job.org_id)
+        .limit(30);
+      for (const s of segments ?? []) push("meeting_segment", s.id, s.content ?? "");
+      return {
+        jobId: job.id,
+        jobType: "embed_backlog",
+        locale: "de-DE",
+        pending,
+      };
+    }
+
+    // P4: Query-Embedding für die kombinierte Suche (interaktiv)
+    case "semantic_search":
+      return {
+        jobId: job.id,
+        jobType: "semantic_search",
+        locale: "de-DE",
+        query: excerpt(String(job.payload.query ?? ""), 500),
+      };
+
     // P1: Ein-Absatz-Zusammenfassung langer Threads
     case "thread_summary": {
       const { data: thread } = await db

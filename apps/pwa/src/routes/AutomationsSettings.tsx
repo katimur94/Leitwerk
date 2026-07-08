@@ -1,37 +1,98 @@
+import { useState } from "react";
 import { Gauge } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
-import type { AutomationRowFull, TrustStatsRow } from "@leitwerk/shared";
 import { Badge, Button, Card, EmptyState, SkeletonRows, TrustMeter } from "@leitwerk/ui";
+import {
+  useAutomations,
+  useSetAutonomyLevel,
+  useToggleAutomation,
+  type AutomationWithStats,
+} from "../features/automations/queries";
 import { t } from "../i18n/de";
-import { supabase } from "../lib/supabase";
-import { useSessionStore } from "../stores/session";
 
-interface AutomationWithStats extends AutomationRowFull {
-  trust_stats: TrustStatsRow | null;
+const LEVEL_LABELS: Record<number, string> = {
+  1: "Stufe 1 — KI schlägt vor, du klickst",
+  2: "Stufe 2 — KI bereitet vor, du gibst frei",
+  3: "Stufe 3 — KI führt aus, Halte-Zone zum Stoppen",
+  4: "Stufe 4 — KI führt autonom aus, meldet Ausnahmen",
+};
+
+function promoteEligible(a: AutomationWithStats): boolean {
+  const total = a.trust_stats?.last_50_total ?? 0;
+  const correct = a.trust_stats?.last_50_correct ?? 0;
+  return total >= a.promote_min_runs && correct / Math.max(total, 1) >= a.promote_threshold;
 }
 
-function useAutomations() {
-  const orgId = useSessionStore((s) => s.activeOrg?.id);
-  return useQuery({
-    queryKey: ["automations", orgId],
-    enabled: !!orgId,
-    refetchInterval: 60_000,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("automations")
-        .select("*, trust_stats(*)")
-        .eq("org_id", orgId!)
-        .order("key", { ascending: true });
-      if (error) throw new Error(error.message);
-      return (data ?? []) as unknown as AutomationWithStats[];
-    },
-  });
+function AutomationRow({ automation }: { automation: AutomationWithStats }) {
+  const setLevel = useSetAutonomyLevel();
+  const toggle = useToggleAutomation();
+  const [error, setError] = useState<string | null>(null);
+  const eligible = promoteEligible(automation);
+
+  return (
+    <li className="flex flex-col gap-2 py-4">
+      <div className="flex items-center gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-[14px] font-medium text-lw-ink">{automation.name}</p>
+          <p className="text-[12px] text-lw-ink-faint">
+            {LEVEL_LABELS[automation.autonomy_level]}
+            {automation.autonomy_level >= 3 ? ` · Halte-Zone ${automation.hold_minutes} Min.` : ""}
+          </p>
+        </div>
+        <Badge tone="neutral">{automation.key}</Badge>
+        <TrustMeter
+          correct={automation.trust_stats?.last_50_correct ?? 0}
+          total={automation.trust_stats?.last_50_total ?? 0}
+          threshold={automation.promote_threshold}
+        />
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={toggle.isPending}
+          onClick={() =>
+            toggle.mutate({ automationId: automation.id, enabled: !automation.is_enabled })
+          }
+        >
+          {automation.is_enabled ? t("automations.disable") : t("automations.enable")}
+        </Button>
+      </div>
+
+      {/* Autonomie-Regler 1–4: Hochstufung prüft der Server (set_autonomy_level) */}
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={1}
+          max={4}
+          step={1}
+          value={automation.autonomy_level}
+          aria-label={`Autonomie-Stufe für ${automation.name}`}
+          className="w-48 accent-[var(--lw-accent)]"
+          onChange={(e) => {
+            setError(null);
+            setLevel.mutate(
+              { automationId: automation.id, level: Number(e.target.value) },
+              { onError: (err) => setError(err.message) },
+            );
+          }}
+        />
+        <span className="text-[12px] tabular-nums text-lw-ink-soft">
+          {automation.autonomy_level}/4
+        </span>
+        {!eligible && automation.autonomy_level < 3 ? (
+          <span className="text-[12px] text-lw-ink-faint">
+            {t("automations.gateHint")
+              .replace("{quote}", String(Math.round(automation.promote_threshold * 100)))
+              .replace("{runs}", String(automation.promote_min_runs))}
+          </span>
+        ) : null}
+      </div>
+      {error ? <p className="text-[12px] text-lw-danger">{error}</p> : null}
+    </li>
+  );
 }
 
 /**
- * Automationen mit Trefferquote (TrustMeter). Der Autonomie-Regler (1–4)
- * mit Hochstufungs-Gate kommt in Etappe 4 — hier zählt die Transparenz:
- * Was läuft, wie treffsicher ist es (Feedback aus automation_runs.outcome).
+ * Autonomie-Regler (MASTERPLAN §4 J): Hochstufen auf Stufe 3/4 gibt es erst
+ * ab nachgewiesener Trefferquote — erzwungen in der DB, nicht nur hier.
  */
 export function AutomationsSettings() {
   const automations = useAutomations();
@@ -65,21 +126,7 @@ export function AutomationsSettings() {
         ) : (
           <ul className="divide-y divide-lw-border">
             {(automations.data ?? []).map((automation) => (
-              <li key={automation.id} className="flex items-center gap-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-medium text-lw-ink">{automation.name}</p>
-                  <p className="text-[12px] text-lw-ink-faint">
-                    {t("automations.level")} {automation.autonomy_level} ·{" "}
-                    {automation.is_enabled ? t("automations.enabled") : t("automations.disabled")}
-                  </p>
-                </div>
-                <Badge tone="neutral">{automation.key}</Badge>
-                <TrustMeter
-                  correct={automation.trust_stats?.last_50_correct ?? 0}
-                  total={automation.trust_stats?.last_50_total ?? 0}
-                  threshold={automation.promote_threshold}
-                />
-              </li>
+              <AutomationRow key={automation.id} automation={automation} />
             ))}
           </ul>
         )}

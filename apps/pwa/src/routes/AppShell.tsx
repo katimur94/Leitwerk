@@ -7,7 +7,9 @@ import {
   ListChecks,
   LogOut,
   Mail,
+  Mic2,
   Moon,
+  NotebookPen,
   Receipt,
   Settings,
   Sunrise,
@@ -15,6 +17,7 @@ import {
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { cn } from "@leitwerk/ui";
 import { CommandBar } from "../components/CommandBar";
+import { HoldBanner } from "../components/HoldBanner";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { NotificationCenter } from "../features/notifications/NotificationCenter";
 import { t } from "../i18n/de";
@@ -28,6 +31,8 @@ const railItems = [
   { to: "/vorgaenge", end: false, icon: FolderOpen, labelKey: "nav.cases" },
   { to: "/aufgaben", end: false, icon: CheckSquare, labelKey: "nav.tasks" },
   { to: "/finanzen", end: false, icon: Receipt, labelKey: "nav.finance" },
+  { to: "/notizen", end: false, icon: NotebookPen, labelKey: "nav.notes" },
+  { to: "/meetings", end: false, icon: Mic2, labelKey: "nav.meetings" },
 ] as const;
 
 function RailLink({
@@ -71,6 +76,7 @@ export function AppShell() {
   return (
     <div className="flex h-full flex-col">
       <OfflineBanner />
+      <HoldBanner />
       <div className="flex min-h-0 flex-1">
         {/* Icon-Rail (56px, DESIGN.md Layout) */}
         <nav className="flex w-14 shrink-0 flex-col items-center gap-1 border-r border-lw-border bg-lw-surface py-3">

@@ -252,24 +252,6 @@ export interface MeetingRow {
   created_at: string;
 }
 
-export interface AutomationRunRow {
-  id: string;
-  org_id: string;
-  automation_id: string;
-  job_id: string | null;
-  entity_type: string | null;
-  entity_id: string | null;
-  action: string;
-  autonomy_level: number;
-  confidence: number | null;
-  status: "proposed" | "approved" | "holding" | "executed" | "stopped" | "rejected" | "failed";
-  hold_until: string | null;
-  outcome: "correct" | "corrected" | "wrong" | null;
-  detail: Record<string, unknown>;
-  executed_at: string | null;
-  created_at: string;
-}
-
 export interface SearchResultRow {
   entity_type: string;
   entity_id: string;

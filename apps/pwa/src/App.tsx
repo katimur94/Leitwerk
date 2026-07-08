@@ -8,6 +8,8 @@ import { Finance } from "./routes/Finance";
 import { Inbox } from "./routes/Inbox";
 import { Login } from "./routes/Login";
 import { MailSettings } from "./routes/MailSettings";
+import { Meetings } from "./routes/Meetings";
+import { Notes } from "./routes/Notes";
 import { Onboarding } from "./routes/Onboarding";
 import { Register } from "./routes/Register";
 import { RulesSettings } from "./routes/RulesSettings";
@@ -44,6 +46,8 @@ export function App() {
         <Route path="vorgaenge/:caseId" element={<CaseDetail />} />
         <Route path="aufgaben" element={<Tasks />} />
         <Route path="finanzen" element={<Finance />} />
+        <Route path="notizen" element={<Notes />} />
+        <Route path="meetings" element={<Meetings />} />
         <Route
           path="einstellungen"
           element={<Navigate to="/einstellungen/runner" replace />}
