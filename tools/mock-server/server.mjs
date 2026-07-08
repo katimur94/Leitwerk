@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createMailHub } from "./mail-hub.mjs";
 
 const PORT = 54321;
 const PEPPER = "mock-pepper";
@@ -37,6 +38,19 @@ const emptyDb = () => ({
   notifications: [],
   org_rules: [],
   tasks: [],
+  // Etappe 1: Mail-Hub + Vorgangsakte
+  mail_accounts: [],
+  mail_threads: [],
+  mail_messages: [],
+  mail_attachments: [],
+  mail_drafts: [],
+  cases: [],
+  case_links: [],
+  case_events: [],
+  contacts: [],
+  companies: [],
+  automation_runs: [],
+  trust_stats: [],
 });
 
 // Rate-Limit auf /pair (Migration 017) — Fenster pro Minute, im Speicher.
@@ -152,6 +166,10 @@ function onOrgCreated(org) {
       key,
       name,
       autonomy_level: 1,
+      is_enabled: true,
+      min_confidence: 0.9,
+      promote_threshold: 0.95,
+      promote_min_runs: 30,
     });
   }
   // 016: Ersteller wird Owner
@@ -349,6 +367,13 @@ function parseFilters(url) {
   const filters = [];
   for (const [key, raw] of url.searchParams.entries()) {
     if (["select", "order", "limit", "offset"].includes(key)) continue;
+    // not.is / not.eq etc.
+    if (raw.startsWith("not.")) {
+      const rest = raw.slice(4);
+      const dot = rest.indexOf(".");
+      filters.push({ column: key, op: `not.${rest.slice(0, dot)}`, value: rest.slice(dot + 1) });
+      continue;
+    }
     const dot = raw.indexOf(".");
     const op = raw.slice(0, dot);
     const value = raw.slice(dot + 1);
@@ -357,10 +382,27 @@ function parseFilters(url) {
   return filters;
 }
 
-function applyFilters(rows, filters) {
+/** Eingebettete Filter (z. B. automations.key=eq.…) auf Fremdtabellen auflösen. */
+function resolveEmbedded(table, row, column) {
+  if (table === "automation_runs" && column.startsWith("automations.")) {
+    const automation = db.automations.find((a) => a.id === row.automation_id);
+    return automation?.[column.slice("automations.".length)];
+  }
+  return row[column];
+}
+
+function applyFilters(rows, filters, table = "") {
   return rows.filter((row) =>
     filters.every(({ column, op, value }) => {
-      const v = row[column];
+      const v = resolveEmbedded(table, row, column);
+      // Volltextsuche (textSearch → wfts/plfts/fts): naive contains-Suche
+      if (op.startsWith("wfts") || op.startsWith("plfts") || op.startsWith("fts")) {
+        const haystack = `${row.subject ?? ""} ${row.body_text ?? ""}`.toLowerCase();
+        return value
+          .toLowerCase()
+          .split(/\s+/)
+          .every((term) => haystack.includes(term.replace(/['"]/g, "")));
+      }
       switch (op) {
         case "eq":
           return String(v) === value;
@@ -368,12 +410,16 @@ function applyFilters(rows, filters) {
           return String(v) !== value;
         case "is":
           return value === "null" ? v === null || v === undefined : String(v) === value;
+        case "not.is":
+          return value === "null" ? v !== null && v !== undefined : String(v) !== value;
         case "gt":
           return v !== null && String(v) > value;
         case "gte":
           return v !== null && String(v) >= value;
         case "lt":
           return v !== null && String(v) < value;
+        case "lte":
+          return v !== null && String(v) <= value;
         case "in": {
           const list = value.replace(/^\(|\)$/g, "").split(",").map((s) => s.replace(/^"|"$/g, ""));
           return list.includes(String(v));
@@ -406,7 +452,7 @@ function applyOrder(rows, url) {
   return sorted;
 }
 
-/** Einzige Embedded-Beziehung, die P0 nutzt: org_members → orgs(*) */
+/** Embedded-Beziehungen, die die PWA nutzt. */
 function applySelect(table, rows, url) {
   const select = url.searchParams.get("select") ?? "*";
   if (table === "org_members" && select.includes("orgs(")) {
@@ -414,6 +460,18 @@ function applySelect(table, rows, url) {
       ...row,
       orgs: db.orgs.find((o) => o.id === row.org_id) ?? null,
     }));
+  }
+  if (table === "cases" && select.includes("companies(")) {
+    return rows.map((row) => {
+      const company = db.companies.find((c) => c.id === row.company_id);
+      return { ...row, companies: company ? { name: company.name } : null };
+    });
+  }
+  if (table === "automation_runs" && select.includes("automations")) {
+    return rows.map((row) => {
+      const automation = db.automations.find((a) => a.id === row.automation_id);
+      return { ...row, automations: automation ? { key: automation.key } : null };
+    });
   }
   return rows;
 }
@@ -429,7 +487,7 @@ function handleRest(req, url, body) {
   const filters = parseFilters(url);
 
   if (req.method === "GET" || req.method === "HEAD") {
-    let rows = applyFilters(db[table], filters);
+    let rows = applyFilters(db[table], filters, table);
     rows = applyOrder(rows, url);
     const limit = url.searchParams.get("limit");
     if (limit) rows = rows.slice(0, Number(limit));
@@ -483,6 +541,10 @@ function handleRpc(req, url, body) {
   const fn = url.pathname.replace(/^\/rest\/v1\/rpc\//, "");
   const user = userFromAuthHeader(req);
   if (!user) return [401, { message: "invalid token" }];
+
+  // Etappe-1-RPCs (create_case, assign_thread_to_case, record_automation_outcome)
+  const mailRpc = mailHub.rpc(fn, body, user);
+  if (mailRpc) return mailRpc;
 
   if (fn === "approve_runner" || fn === "reject_runner") {
     const runner = db.runners.find((r) => r.id === body.p_runner_id);
@@ -615,6 +677,8 @@ function completeJob(runnerId, jobId, result, resultHash) {
   if (!job) return;
   Object.assign(job, { status: "done", result, result_hash: resultHash, error: null, updated_at: now() });
   db.agent_job_events.push({ id: db.agent_job_events.length + 1, job_id: jobId, event: "done", detail: {}, created_at: now() });
+  // Migration 018: apply_job_result-Trigger
+  mailHub.applyJobResult(job);
   persist();
 }
 
@@ -797,6 +861,9 @@ function handleBuildJobContext(req, _url, body) {
       },
     }];
   }
+  // Etappe 1: Mail-Skills + sync_mail
+  const context = mailHub.buildContext(job);
+  if (context) return [200, { context }];
   return [422, { error: `Unbekannter Job-Typ: ${job.job_type}` }];
 }
 
@@ -833,6 +900,7 @@ const server = http.createServer(async (req, res) => {
 
   let status = 404;
   let payload = { message: `Route nicht implementiert: ${req.method} ${url.pathname}` };
+  let extraHeaders = {};
 
   try {
     if (url.pathname.startsWith("/auth/v1/")) {
@@ -845,6 +913,24 @@ const server = http.createServer(async (req, res) => {
       [status, payload] = handleBroker(req, url, body);
     } else if (url.pathname.startsWith("/functions/v1/build-job-context")) {
       [status, payload] = handleBuildJobContext(req, url, body);
+    } else if (url.pathname.startsWith("/functions/v1/oauth-gmail")) {
+      [status, payload, extraHeaders = {}] = mailHub.handleOauthGmail(
+        req, url, body, userFromAuthHeader(req),
+      );
+    } else if (url.pathname.startsWith("/functions/v1/mail-sync")) {
+      const runner = verifyRunner(req);
+      if (!runner || ["disabled", "pending_approval"].includes(runner.status)) {
+        [status, payload] = [401, { error: "Runner-Authentifizierung fehlgeschlagen" }];
+      } else {
+        [status, payload] = mailHub.handleMailSync(req, url, body, runner);
+      }
+    } else if (url.pathname.startsWith("/functions/v1/send-mail")) {
+      [status, payload] = mailHub.handleSendMail(req, url, body, userFromAuthHeader(req));
+    } else if (url.pathname.startsWith("/gmail/v1/users/me")) {
+      [status, payload] = mailHub.handleGmailApi(req, url);
+    } else if (url.pathname.startsWith("/storage/v1/object/")) {
+      // Upload-Stub: Blob wird verworfen, Pfad bestätigt (nur Demo)
+      [status, payload] = [200, { Key: url.pathname.replace("/storage/v1/object/", "") }];
     } else if (url.pathname.startsWith("/realtime/")) {
       // Kein Websocket im Mock — PWA fällt auf Polling zurück.
       [status, payload] = [404, { message: "Realtime im Mock nicht verfügbar (Polling aktiv)" }];
@@ -858,11 +944,16 @@ const server = http.createServer(async (req, res) => {
     console.log(`[mock] ${req.method} ${url.pathname}${url.search} → ${status}`);
   }
 
-  res.writeHead(status, { ...CORS, "Content-Type": "application/json" });
+  res.writeHead(status, { ...CORS, ...extraHeaders, "Content-Type": "application/json" });
   res.end(payload === null ? "" : JSON.stringify(payload));
 });
+
+// Mail-Hub-Emulation (Etappe 1) + Cron-Ersatz für den Gmail-Sync
+const mailHub = createMailHub({ db, persist });
+setInterval(() => mailHub.enqueueSyncJobs(), 30_000);
 
 server.listen(PORT, () => {
   console.log(`[mock] Leitwerk-Mock-Backend läuft auf http://127.0.0.1:${PORT}`);
   console.log(`[mock] Functions-URL für den Runner: http://127.0.0.1:${PORT}/functions/v1`);
+  console.log(`[mock] Gmail-API-Mock für den Runner: LEITWERK_GMAIL_API_URL=http://127.0.0.1:${PORT}/gmail/v1/users/me`);
 });

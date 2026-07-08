@@ -4,7 +4,10 @@
 // das die Edge Function mail-sync aus dem Vault-Refresh-Token erzeugt.
 import type { IngestMessage, MailAddress } from "@leitwerk/shared";
 
-const GMAIL_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
+// Override nur für die lokale Mock-Umgebung (tools/mock-server).
+const GMAIL_BASE =
+  process.env.LEITWERK_GMAIL_API_URL ??
+  "https://gmail.googleapis.com/gmail/v1/users/me";
 
 // ---------- Typen (Gmail-API-Subset) ----------
 

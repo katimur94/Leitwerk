@@ -322,11 +322,11 @@ try {
     { at: 'nav button[title="Design wechseln"]', label: "Hell/Dunkel umschalten" },
   ]);
 
-  // ---- 12 Modul-Platzhalter (Posteingang) ----
-  await page.click('nav [title="Posteingang"]');
-  await page.waitForSelector('main :text("Phase 1")');
+  // ---- 12 Modul-Platzhalter (Aufgaben, Phase 2) ----
+  await page.click('nav [title="Aufgaben"]');
+  await page.waitForSelector('main :text("Phase 2")');
   await capture("modul-platzhalter", [
-    { at: 'nav [title="Posteingang"]', label: "Module sind angelegt …" },
+    { at: 'nav [title="Aufgaben"]', label: "Module sind angelegt …" },
     { at: "main p", label: "… und zeigen ehrlich ihre Phase (kein leerer Screen)" },
   ]);
 
@@ -342,6 +342,7 @@ try {
   // ---- 14 Runner-Einstellungen (Runner läuft) ----
   const runner = startProcess(["apps/runner/dist/index.js", "start"], {
     LEITWERK_CLAUDE_BIN: CLAUDE_MOCK,
+    LEITWERK_GMAIL_API_URL: "http://127.0.0.1:54321/gmail/v1/users/me",
   });
   children.push(runner.child);
   await waitFor(() => runner.out().includes("Leitwerk-Runner gestartet"), 15_000, "Runner-Start");
@@ -390,7 +391,110 @@ try {
     { at: 'p:has-text("Mock-Antwort")', label: "KI-Antwort — violettes Badge = kommt von der KI" },
   ]);
 
-  // ---- 18 Regel-Builder (Etappe 0.5) ----
+  // ---- 18 Postfach verbinden (Etappe 1, Demo-Postfach im Mock) ----
+  await page.goto(`${BASE}/einstellungen/postfaecher`);
+  await page.waitForSelector('button:has-text("Gmail verbinden")');
+  await capture("postfach-verbinden", [
+    { at: 'button:has-text("Gmail verbinden")', label: "OAuth-Flow — Refresh-Token landet im Server-Tresor" },
+    { at: 'h3:has-text("Verbundene Konten")', label: "Sync-Status pro Konto" },
+  ]);
+  await page.click('button:has-text("Gmail verbinden")');
+  // Mock-Callback → Redirect zurück mit ?connected=…
+  await page.waitForSelector(':text("demo@leitwerk.test")', { timeout: 20_000 });
+  await capture("postfach-verbunden", [
+    { at: 'li:has-text("demo@leitwerk.test")', label: "Konto verbunden — Runner startet den Sync" },
+  ]);
+
+  // ---- 19 Inbox mit KI-Kategorien ----
+  await page.goto(`${BASE}/posteingang`);
+  // Sync (Runner) + classify_email (Mock-KI) abwarten
+  await waitFor(async () => {
+    await page.reload();
+    await sleep(1200);
+    return (await page.locator('main :text("Rechnung RE-88123")').count()) > 0;
+  }, 90_000, "Demo-Mails in der Inbox");
+  await waitFor(async () => {
+    await page.reload();
+    await sleep(1200);
+    return (await page.locator('span:text-is("Anfrage")').count()) > 0;
+  }, 90_000, "KI-Kategorien an den Threads").catch(() => {
+    console.warn("  ⚠ Kategorien noch nicht sichtbar — Screenshot trotzdem");
+  });
+  await page.goto(`${BASE}/posteingang`);
+  await page.waitForSelector('main :text("Rechnung RE-88123")');
+  await sleep(800);
+  await capture("inbox", [
+    { at: 'button:has-text("Rechnung RE-88123")', label: "InboxRow: Absender · Betreff · Snippet" },
+    { at: 'input[placeholder*="durchsuchen"]', label: "Volltextsuche (tsvector, german)" },
+    { at: 'main button[title="Neue E-Mail"]', label: "Neue E-Mail verfassen", side: "left" },
+  ]);
+
+  // ---- 20 Thread mit Auto-Vorgang ----
+  await page.click('button:has-text("Anfrage: Sanierung Bürogebäude")');
+  await page.waitForSelector('h2:has-text("Anfrage: Sanierung Bürogebäude")');
+  await waitFor(async () => {
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await sleep(800);
+    return (await page.locator(':text("Vorgang öffnen")').count()) > 0;
+  }, 60_000, "Auto-Vorgang am Thread").catch(() => {
+    console.warn("  ⚠ case_match noch nicht durch — Screenshot trotzdem");
+  });
+  await capture("thread-vorgang", [
+    { at: 'h2:has-text("Anfrage: Sanierung")', label: "Thread-Ansicht mit kompletter Konversation" },
+    { at: 'main a:has-text("Vorgang öffnen")', label: "case_match hat automatisch einen Vorgang angelegt" },
+    { at: 'button:has-text("Antworten")', label: "Antworten — oder gleich den KI-Entwurf", side: "left" },
+  ]);
+
+  // ---- 21 KI-Entwurf anfordern ----
+  await page.click('button:has-text("KI-Entwurf anfordern")');
+  await waitFor(async () => {
+    await sleep(1000);
+    return (await page.locator('span:has-text("KI-Entwurf")').count()) > 0;
+  }, 60_000, "KI-Entwurf im Thread");
+  await capture("ki-entwurf", [
+    { at: 'div:has(> div > span:has-text("KI-Entwurf")) >> nth=0', label: "Violett = von der KI — senden erst nach Freigabe" },
+    { at: 'button:has-text("Bearbeiten & senden")', label: "Entwurf übernehmen und bearbeiten", side: "left" },
+  ]);
+
+  // ---- 22 Senden mit 30s-Rückholen ----
+  await page.click('button:has-text("Bearbeiten & senden")');
+  // Exakter Name: has-text("Senden") würde auch Snippets wie
+  // "… senden Sie uns …" in der Thread-Liste treffen.
+  const sendButton = page.getByRole("button", { name: "Senden", exact: true });
+  await sendButton.waitFor({ timeout: 15_000 });
+  await sendButton.click();
+  await page.waitForSelector(':text("Wird in")');
+  await capture("senden-undo", [
+    { at: ':text("Wird in")', label: "30 Sekunden Rückhol-Fenster — serverseitig erzwungen" },
+    { at: 'button:has-text("Rückholen")', label: "Ein Klick stoppt den Versand", side: "left" },
+  ]);
+  await waitFor(async () => {
+    await sleep(1000);
+    return (await page.locator(':text("Gesendet ✓")').count()) > 0;
+  }, 60_000, "Versand nach Ablauf des Undo-Fensters");
+  await capture("gesendet", [
+    { at: ':text("Gesendet ✓")', label: "Nach Ablauf: Versand über die Edge Function send-mail" },
+  ]);
+
+  // ---- 23 Vorgänge (Auto-Anlage durch die KI) ----
+  await page.goto(`${BASE}/vorgaenge`);
+  await page.waitForSelector('main :text("V-2026-")');
+  await capture("vorgaenge", [
+    { at: 'a:has-text("Sanierung")', label: "Vorgang mit Nummernkreis (V-2026-…)" },
+    { at: 'span:has-text("KI-angelegt")', label: "Von case_match automatisch angelegt", side: "left" },
+    { at: 'input[placeholder*="Titel des neuen"]', label: "Manuell anlegen geht immer", side: "left" },
+  ]);
+
+  // ---- 24 Vorgangsakte mit Timeline ----
+  await page.click('a:has-text("Sanierung")');
+  await page.waitForSelector('h3:has-text("Zeitleiste")');
+  await capture("vorgang-detail", [
+    { at: 'h3:has-text("Zeitleiste")', label: "CaseTimeline — violetter Punkt = KI-Eintrag" },
+    { at: 'h3:has-text("E-Mail-Threads")', label: "Alles hängt am Vorgang", side: "left" },
+    { at: 'button:has-text("Wartet")', label: "Status: offen · wartet · erledigt · archiviert" },
+  ]);
+
+  // ---- 25 Regel-Builder (Etappe 0.5) ----
   await page.goto(`${BASE}/einstellungen/regeln`);
   await page.waitForSelector('h3:has-text("Neue Regel")');
   await page.fill("#rule-name", "Rechnungen sofort melden");
@@ -411,7 +515,7 @@ try {
     { at: 'li:has-text("Rechnungen sofort melden")', label: "Regel aktiv — pausieren oder löschen jederzeit" },
   ]);
 
-  // ---- 19 Dark Mode ----
+  // ---- 27 Dark Mode ----
   await page.click('nav button[title="Design wechseln"]');
   await sleep(400);
   await capture("dark-mode", [

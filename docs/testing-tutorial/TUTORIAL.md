@@ -37,8 +37,12 @@ pnpm --filter @leitwerk/pwa dev
 
 # 4. Runner pairen & starten (Terminal 3) — Code kommt aus Schritt 6 unten
 node apps/runner/dist/index.js init --url http://127.0.0.1:54321/functions/v1
-LEITWERK_CLAUDE_BIN=tools/mock-server/claude-mock.cjs node apps/runner/dist/index.js start
+LEITWERK_CLAUDE_BIN=tools/mock-server/claude-mock.cjs \
+LEITWERK_GMAIL_API_URL=http://127.0.0.1:54321/gmail/v1/users/me \
+node apps/runner/dist/index.js start
 ```
+`LEITWERK_GMAIL_API_URL` zeigt auf die Mini-Gmail-API des Mocks (Etappe 1) —
+„Gmail verbinden“ legt dann ein **Demo-Postfach** mit fünf Beispiel-Mails an.
 
 Screenshots neu erzeugen: `node tools/e2e-tutorial/run.mjs`
 (Mock-Backend + PWA müssen laufen; vorher `tools/mock-server/data/` löschen für einen frischen Stand).
@@ -155,9 +159,10 @@ sinnvollen Schritt. **(4)** Einstellungen und **(5)** Theme-Umschalter unten in 
 
 ![Modul-Platzhalter](img/12-modul-platzhalter.png)
 
-**(1)** Alle Module sind navigierbar, **(2)** zeigen aber statt leerer Flächen einen
-Empty-State mit ihrer Phase (Posteingang/Vorgänge → Phase 1, Aufgaben → Phase 2,
-Finanzen → Phase 3). Kein Feature ohne Empty-State — Regel 9 aus `CLAUDE.md`.
+**(1)** Alle Module sind navigierbar, **(2)** noch nicht gebaute zeigen statt leerer
+Flächen einen Empty-State mit ihrer Phase (Aufgaben → Phase 2, Finanzen → Phase 3).
+Posteingang und Vorgänge sind seit Etappe 1 produktiv (Abschnitte 18–26).
+Kein Feature ohne Empty-State — Regel 9 aus `CLAUDE.md`.
 
 ## 13 · CommandBar (Strg/Cmd + K)
 
@@ -211,9 +216,92 @@ gibt es genau einen **schlanken Reparatur-Versuch** (nur Schema-Beschreibung +
 fehlerhafte Antwort, gekürzt auf 2000 Zeichen — nicht der komplette Original-Prompt);
 danach greift der Backoff-Retry der Queue.
 
-## 18 · Regel-Builder (Einstellungen → Regeln)
+## 18 · Postfach verbinden (Etappe 1)
 
-![Regel-Builder](img/18-regel-builder.png)
+![Postfach verbinden](img/18-postfach-verbinden.png)
+
+**(1)** „Gmail verbinden“ startet den OAuth-Flow über die Edge Function `oauth-gmail`:
+Der Browser sieht nur die Google-URL und den Redirect — das Refresh-Token wandert
+direkt in den **Supabase Vault** (Regel 1: Tokens nie im Client). **(2)** Danach
+erscheint das Konto mit Live-Sync-Status. Im Mock ersetzt ein Demo-Postfach mit fünf
+Beispiel-Mails den echten Google-Flow.
+
+## 19 · Konto verbunden
+
+![Postfach verbunden](img/19-postfach-verbunden.png)
+
+**(1)** Der Runner übernimmt den Sync (Initial: 90 Tage, danach Delta über die
+Gmail-History-API alle 2 Minuten). Er bekommt dafür nur ein **kurzlebiges**
+Access-Token von der Edge Function `mail-sync` — nie das Refresh-Token. Geschrieben
+wird ausschließlich über `/ingest` (Dedupe über Unique-Constraints, Regel 2 + 6).
+
+## 20 · Inbox mit KI-Kategorien
+
+![Inbox](img/20-inbox.png)
+
+**(1)** Die InboxRow nach DESIGN.md: Absender · Betreff · Snippet, rechts
+Kategorie-Chip + Zeit; ungelesen = 2px-Akzentbalken links. Die Kategorien (Anfrage,
+Rechnung, Auftrag, Termin, Newsletter …) stammen von `classify_email` — violett,
+weil KI-Herkunft. Korrektur per Dropdown fließt als `outcome='corrected'` in die
+Trefferquote zurück (Regel 5). **(2)** Volltextsuche über `tsvector` (german),
+**(3)** neue E-Mail verfassen. Tastatur: j/k navigiert, e archiviert.
+
+## 21 · Thread mit Auto-Vorgang
+
+![Thread](img/21-thread-vorgang.png)
+
+**(1)** Die Thread-Ansicht mit kompletter Konversation. **(2)** `case_match` hat den
+Thread automatisch einem Vorgang zugeordnet (Konfidenz ≥ `min_confidence` der
+Automation, serverseitig erzwungen im `apply_job_result`-Trigger). Unterhalb der
+Schwelle erscheint stattdessen ein violetter **Vorschlags-Banner** mit
+Übernehmen/Ablehnen — beides speist die Trefferquote. **(3)** Antworten manuell
+oder per KI-Entwurf.
+
+## 22 · KI-Entwurf
+
+![KI-Entwurf](img/22-ki-entwurf.png)
+
+**(1)** `draft_reply` schreibt den Entwurf in `mail_drafts` (source='ai') — violett
+markiert, gesendet wird NIE ohne Freigabe (Regel 4). **(2)** „Bearbeiten & senden“
+öffnet den Composer (Tiptap) mit dem Entwurf.
+
+## 23 · Senden mit 30-Sekunden-Rückholen
+
+![Senden mit Undo](img/23-senden-undo.png)
+
+**(1)** Senden plant den Versand (`status='scheduled'`, `send_after = jetzt + 30 s`) —
+die Edge Function `send-mail` erzwingt das Zeitfenster **serverseitig**, auch die
+Stufe-3-Halte-Zone läuft später über denselben Mechanismus. **(2)** Ein Klick holt
+die Mail zurück (Status zurück auf Entwurf).
+
+## 24 · Gesendet
+
+![Gesendet](img/24-gesendet.png)
+
+**(1)** Nach Ablauf des Fensters geht die Mail über die Gmail-API raus (MIME inkl.
+Anhängen und Reply-Headern); die Outbound-Nachricht landet im Thread und in der
+Vorgangs-Timeline (`mail_out`).
+
+## 25 · Vorgänge
+
+![Vorgänge](img/25-vorgaenge.png)
+
+**(1)** Vorgänge mit Nummernkreis (`V-2026-…`), Status und letzter Aktivität.
+**(2)** Von der KI angelegte Vorgänge tragen das violette Badge „KI-angelegt“.
+**(3)** Manuell anlegen geht jederzeit (RPC `create_case`).
+
+## 26 · Vorgangsakte
+
+![Vorgangsakte](img/26-vorgang-detail.png)
+
+**(1)** Die CaseTimeline: jedes Ereignis (Anlage, Mail ein/aus, Verknüpfung) mit
+Zeitstempel — **violetter Punkt = KI-Eintrag** (eiserne Design-Regel).
+**(2)** Verknüpfte E-Mail-Threads; ab Phase 2/3 hängen hier auch Aufgaben und Belege.
+**(3)** Status-Wechsel direkt in der Akte.
+
+## 27 · Regel-Builder (Einstellungen → Regeln)
+
+![Regel-Builder](img/27-regel-builder.png)
 
 Die Regel-Engine light (Etappe 0.5): **(1)** Jede Regel folgt dem Muster „Wenn
 *Ereignis* und *Bedingungen*, dann *Aktion*“. **(2)** Ereignisse wie `mail_received`,
@@ -222,16 +310,17 @@ Modulen ausgelöst. **(3)** Bedingungen prüfen Felder der Entity (UND-verknüpf
 von „ist gleich“ bis „fehlt“). **(4)** Ausgewertet wird serverseitig durch die
 Postgres-Funktion `evaluate_org_rules` — Aktionen: Benachrichtigung, Aufgabe oder KI-Job.
 
-## 19 · Regel aktiv
+## 28 · Regel aktiv
 
-![Regel-Liste](img/19-regel-liste.png)
+![Regel-Liste](img/28-regel-liste.png)
 
 **(1)** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede Ausführung
-landet im Audit-Log (`rule.executed`).
+landet im Audit-Log (`rule.executed`). Seit Etappe 1 feuern `mail_received` und
+`mail_sent` bei jeder synchronisierten bzw. gesendeten Nachricht durch die Engine.
 
-## 20 · Dark Mode
+## 29 · Dark Mode
 
-![Dark Mode](img/20-dark-mode.png)
+![Dark Mode](img/29-dark-mode.png)
 
 **(1)** Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um
 (alle Design-Tokens aus `DESIGN.md`, inklusive angepasster Marken- und KI-Farben).
@@ -239,7 +328,7 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ---
 
-## Was hier Ende-zu-Ende bewiesen ist (Definition of Done P0 + Etappe 0.5)
+## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappe 0.5 + Etappe 1)
 
 1. Registrierung → Org-Anlage → Onboarding-Wizard mit Stammdaten aus `org_profile` ✓
 2. Runner-Pairing über Pairing-Code + Token-Hash, gehärtet mit Rate-Limit,
@@ -247,7 +336,10 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 3. Dummy-Job `echo` läuft komplett durch: PWA → Queue → Runner → KI → Ergebnis in der PWA ✓
 4. Abo-Schutz (Limits + Nachtfenster) einstellbar, serverseitig in `claim_next_job` erzwungen ✓
 5. Regel-Engine light: Regel anlegen, pausieren, löschen (Auswertung: `evaluate_org_rules`) ✓
-6. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
+6. **Etappe 1:** Postfach verbinden → Runner-Sync → `classify_email` (Kategorien in der
+   Inbox) → `case_match` (Auto-Vorgang mit Nummernkreis) → `draft_reply` (KI-Entwurf) →
+   Senden mit 30s-Rückholen → Outbound in Thread + Vorgangs-Timeline ✓
+7. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
 
 Gegen echtes Supabase ist der Ablauf identisch — nur dass `supabase start` die
 Datenbank stellt, die Edge Functions in Deno laufen und Updates per Realtime statt
