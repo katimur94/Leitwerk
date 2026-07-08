@@ -133,6 +133,26 @@ export class BrokerClient {
     return { messages: data.messages ?? 0, attachments: data.attachments ?? 0 };
   }
 
+  // ---------- calendar-sync (Etappe 5): Google-Calendar-Connector ----------
+
+  /** Kurzlebiges Calendar-Access-Token — Refresh-Token bleibt im Vault. */
+  async calendarToken(accountId: string): Promise<{ accessToken: string; calendarRef: string }> {
+    const data = (await this.post("calendar-sync", "/token", { accountId })) as {
+      accessToken?: string;
+      calendarRef?: string;
+    };
+    if (!data.accessToken || !data.calendarRef) {
+      throw new Error("calendar-sync /token lieferte kein Access-Token");
+    }
+    return { accessToken: data.accessToken, calendarRef: data.calendarRef };
+  }
+
+  /** Batch-Ingest synchronisierter Kalender-Events (Dedupe serverseitig). */
+  async calendarIngest(payload: unknown): Promise<{ events: number }> {
+    const data = (await this.post("calendar-sync", "/ingest", payload)) as { events?: number };
+    return { events: data.events ?? 0 };
+  }
+
   /** Blob aus dem Storage laden (Buckets 'attachments' oder 'audio'). */
   async mailDownload(storagePath: string, bucket = "attachments"): Promise<Uint8Array> {
     const data = (await this.post("mail-sync", "/download", { storagePath, bucket })) as {
