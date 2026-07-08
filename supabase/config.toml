@@ -65,3 +65,7 @@ verify_jwt = false
 # /start prüft das Nutzer-JWT selbst via auth.getUser.
 [functions.oauth-gmail]
 verify_jwt = false
+
+# Runner-authentifiziert (Runner-Token statt JWT) — Etappe 5.
+[functions.calendar-sync]
+verify_jwt = false

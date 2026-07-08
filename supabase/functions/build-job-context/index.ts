@@ -690,6 +690,191 @@ async function buildContext(
         query: excerpt(String(job.payload.query ?? ""), 500),
       };
 
+    // P5: Google-Calendar-Sync (Connector, kein KI-Aufruf)
+    case "sync_calendar": {
+      const { data: account } = await db
+        .from("calendar_accounts")
+        .select("id, org_id, calendar_ref, provider, sync_cursor")
+        .eq("id", String(job.payload.account_id ?? ""))
+        .maybeSingle();
+      if (!account || account.org_id !== job.org_id) return null;
+      return {
+        jobId: job.id,
+        jobType: "sync_calendar",
+        account: {
+          id: account.id,
+          calendar_ref: account.calendar_ref,
+          provider: account.provider,
+          sync_cursor: account.sync_cursor,
+          initial_days: 30,
+        },
+      };
+    }
+
+    // P5: Kontext-Briefing vor einem Termin
+    case "calendar_briefing": {
+      const { data: event } = await db
+        .from("calendar_events")
+        .select("id, org_id, title, starts_at, location, attendees, case_id, cases(case_number)")
+        .eq("id", String(job.payload.event_id ?? ""))
+        .maybeSingle();
+      if (!event || event.org_id !== job.org_id) return null;
+      const attendeeEmails = ((event.attendees as Array<{ email?: string }> | null) ?? [])
+        .map((a) => a.email)
+        .filter(Boolean) as string[];
+      // Kontext: offene Vorgänge/Rechnungen zu den Teilnehmer-Domains (datenminimiert)
+      const context: Array<{ kind: string; detail: string }> = [];
+      if (event.case_id) {
+        const { data: openInv } = await db
+          .from("invoices_out")
+          .select("invoice_number, gross_amount, status")
+          .eq("org_id", job.org_id)
+          .eq("case_id", event.case_id)
+          .in("status", ["sent", "overdue", "partially_paid"])
+          .limit(3);
+        for (const inv of openInv ?? []) {
+          context.push({
+            kind: "Offene Rechnung",
+            detail: `${inv.invoice_number}: ${inv.gross_amount} € (${inv.status})`,
+          });
+        }
+      }
+      for (const email of attendeeEmails.slice(0, 3)) {
+        const { data: lastMsg } = await db
+          .from("mail_messages")
+          .select("subject, sent_at")
+          .eq("org_id", job.org_id)
+          .contains("from_addr", { email })
+          .order("sent_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lastMsg) {
+          context.push({ kind: `Letzte Mail von ${email}`, detail: `${lastMsg.subject ?? ""} (${lastMsg.sent_at ?? ""})` });
+        }
+      }
+      return {
+        jobId: job.id,
+        jobType: "calendar_briefing",
+        locale: "de-DE",
+        today: new Date().toISOString().slice(0, 10),
+        event: {
+          event_id: event.id,
+          title: event.title ?? "",
+          starts_at: event.starts_at,
+          location: event.location,
+          attendees: attendeeEmails,
+          case_number: (event.cases as { case_number?: string } | null)?.case_number ?? null,
+        },
+        context,
+      };
+    }
+
+    // P5: Terminvorschlag — 3 freie Slots berechnen
+    case "suggest_slots": {
+      const { data: thread } = await db
+        .from("mail_threads")
+        .select("id, org_id, account_id, subject, participants")
+        .eq("id", String(job.payload.thread_id ?? ""))
+        .maybeSingle();
+      if (!thread || thread.org_id !== job.org_id) return null;
+      const { data: account } = await db
+        .from("mail_accounts")
+        .select("email_address, signature_html")
+        .eq("id", thread.account_id)
+        .maybeSingle();
+      // Belegte Zeiten der nächsten 10 Tage laden
+      const horizonStart = new Date();
+      const horizonEnd = new Date(Date.now() + 10 * 86_400_000);
+      const { data: busy } = await db
+        .from("calendar_events")
+        .select("starts_at, ends_at")
+        .eq("org_id", job.org_id)
+        .eq("status", "confirmed")
+        .gte("starts_at", horizonStart.toISOString())
+        .lte("starts_at", horizonEnd.toISOString());
+      const busyRanges = (busy ?? []).map((b) => [Date.parse(b.starts_at), Date.parse(b.ends_at)]);
+      const slots: Array<{ starts_at: string; ends_at: string; label: string }> = [];
+      const dayNames = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+      for (let day = 1; day <= 10 && slots.length < 3; day += 1) {
+        const base = new Date(Date.now() + day * 86_400_000);
+        if (base.getUTCDay() === 0 || base.getUTCDay() === 6) continue; // kein Wochenende
+        for (const hour of [10, 14]) {
+          if (slots.length >= 3) break;
+          const start = new Date(base);
+          start.setUTCHours(hour, 0, 0, 0);
+          const end = new Date(start.getTime() + 60 * 60_000);
+          const collides = busyRanges.some(([bs, be]) => start.getTime() < be && end.getTime() > bs);
+          if (collides) continue;
+          const label = `${dayNames[start.getUTCDay()]} ${String(start.getUTCDate()).padStart(2, "0")}.${String(start.getUTCMonth() + 1).padStart(2, "0")}. ${String(hour).padStart(2, "0")}:00`;
+          slots.push({ starts_at: start.toISOString(), ends_at: end.toISOString(), label });
+        }
+      }
+      const replyTo = ((thread.participants as Addr[] | null) ?? [])[0] ?? { email: "" };
+      return {
+        jobId: job.id,
+        jobType: "suggest_slots",
+        locale: "de-DE",
+        today: new Date().toISOString().slice(0, 10),
+        thread: { thread_id: thread.id, subject: thread.subject ?? "", reply_to: replyTo },
+        free_slots: slots,
+        signature_html: account?.signature_html ?? null,
+      };
+    }
+
+    // P5: Wochenrückblick (freitags)
+    case "weekly_report": {
+      const today = new Date().toISOString().slice(0, 10);
+      const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+      const { data: org } = await db.from("orgs").select("name").eq("id", job.org_id).maybeSingle();
+      const { count: mailsHandled } = await db
+        .from("mail_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("org_id", job.org_id)
+        .gte("created_at", weekAgo);
+      const { count: tasksDone } = await db
+        .from("tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("org_id", job.org_id)
+        .eq("status", "done")
+        .gte("completed_at", weekAgo);
+      const { count: tasksOpen } = await db
+        .from("tasks")
+        .select("id", { count: "exact", head: true })
+        .eq("org_id", job.org_id)
+        .in("status", ["open", "in_progress"]);
+      const { data: sentInv } = await db
+        .from("invoices_out")
+        .select("gross_amount, status, sent_at, paid_at")
+        .eq("org_id", job.org_id);
+      const invoicesSent = (sentInv ?? []).filter((i) => i.sent_at && i.sent_at >= weekAgo).length;
+      const invoicesPaid = (sentInv ?? []).filter((i) => i.paid_at && i.paid_at >= weekAgo).length;
+      const { data: quotes } = await db
+        .from("quotes")
+        .select("gross_amount, status")
+        .eq("org_id", job.org_id)
+        .in("status", ["sent", "followed_up"]);
+      const pipelineCents = (quotes ?? []).reduce(
+        (sum, q) => sum + Math.round((q.gross_amount ?? 0) * 100),
+        0,
+      );
+      return {
+        jobId: job.id,
+        jobType: "weekly_report",
+        locale: "de-DE",
+        for_date: today,
+        org_name: org?.name ?? "",
+        stats: {
+          mails_handled: mailsHandled ?? 0,
+          tasks_done: tasksDone ?? 0,
+          tasks_open: tasksOpen ?? 0,
+          invoices_sent: invoicesSent,
+          invoices_paid: invoicesPaid,
+          pipeline_value_cents: pipelineCents,
+          ai_accuracy: null,
+        },
+      };
+    }
+
     // P1: Ein-Absatz-Zusammenfassung langer Threads
     case "thread_summary": {
       const { data: thread } = await db
