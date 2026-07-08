@@ -1,0 +1,45 @@
+/* Leitwerk Design-Tokens — Quelle: docs/DESIGN.md (nicht frei erfinden!) */
+:root {
+  /* Fundament — warmes Grau, kein reines Weiß */
+  --lw-bg: #fafaf8;
+  --lw-surface: #ffffff;
+  --lw-surface-2: #f4f4f1;
+  --lw-border: #e7e6e1;
+  --lw-border-strong: #d6d4cd;
+
+  /* Text */
+  --lw-ink: #1a1d23;
+  --lw-ink-soft: #5b6068;
+  --lw-ink-faint: #9aa0a8;
+
+  /* Marke: "Tinte" — tiefes Indigo-Blau, sparsam einsetzen */
+  --lw-brand: #1e2a4a;
+  --lw-brand-hover: #16203a;
+  --lw-accent: #3d5afe;
+
+  /* Semantik */
+  --lw-success: #1d7a4c;
+  --lw-warning: #b45309;
+  --lw-danger: #b3261e;
+  --lw-ai: #6d4ac9; /* NUR für KI-Herkunft (AiBadge, Findings, Konfidenz) */
+
+  --lw-radius-sm: 6px;
+  --lw-radius-md: 10px;
+  --lw-radius-lg: 16px;
+  --lw-shadow-1: 0 1px 2px rgb(20 22 26 / 0.05);
+  --lw-shadow-2: 0 4px 16px rgb(20 22 26 / 0.08);
+}
+
+[data-theme="dark"] {
+  --lw-bg: #101216;
+  --lw-surface: #16191f;
+  --lw-surface-2: #1c2028;
+  --lw-border: #262b33;
+  --lw-border-strong: #333a45;
+  --lw-ink: #ecedef;
+  --lw-ink-soft: #a6acb6;
+  --lw-ink-faint: #6b717c;
+  --lw-brand: #8fa3e8;
+  --lw-accent: #7c93ff;
+  --lw-ai: #a78be8;
+}
