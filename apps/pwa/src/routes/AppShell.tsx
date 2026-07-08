@@ -1,4 +1,5 @@
 import {
+  CalendarClock,
   CheckSquare,
   Cpu,
   FolderOpen,
@@ -33,6 +34,7 @@ const railItems = [
   { to: "/finanzen", end: false, icon: Receipt, labelKey: "nav.finance" },
   { to: "/notizen", end: false, icon: NotebookPen, labelKey: "nav.notes" },
   { to: "/meetings", end: false, icon: Mic2, labelKey: "nav.meetings" },
+  { to: "/kalender", end: false, icon: CalendarClock, labelKey: "nav.calendar" },
 ] as const;
 
 function RailLink({

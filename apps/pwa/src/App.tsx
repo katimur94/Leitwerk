@@ -4,6 +4,7 @@ import { AppShell } from "./routes/AppShell";
 import { AutomationsSettings } from "./routes/AutomationsSettings";
 import { CaseDetail } from "./routes/CaseDetail";
 import { CasesList } from "./routes/CasesList";
+import { Calendar } from "./routes/Calendar";
 import { Finance } from "./routes/Finance";
 import { Inbox } from "./routes/Inbox";
 import { Login } from "./routes/Login";
@@ -48,6 +49,7 @@ export function App() {
         <Route path="finanzen" element={<Finance />} />
         <Route path="notizen" element={<Notes />} />
         <Route path="meetings" element={<Meetings />} />
+        <Route path="kalender" element={<Calendar />} />
         <Route
           path="einstellungen"
           element={<Navigate to="/einstellungen/runner" replace />}

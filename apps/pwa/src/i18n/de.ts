@@ -31,6 +31,7 @@ export const de: Record<string, string> = {
   "nav.finance": "Finanzen",
   "nav.notes": "Notizen",
   "nav.meetings": "Meetings",
+  "nav.calendar": "Kalender",
   "nav.settings": "Einstellungen",
 
   "commandbar.placeholder": "Suchen oder Befehl eingeben …",
@@ -400,6 +401,33 @@ export const de: Record<string, string> = {
   "meetings.status.transcribing": "transkribiert",
   "meetings.empty.title": "Noch keine Meetings",
   "meetings.empty.description": "Lade eine Aufnahme hoch — der Runner transkribiert lokal und erstellt Protokoll + Aufgaben.",
+
+  // ---- Team & Kalender (Etappe 5) ----
+  "collab.assignee": "Zuständig",
+  "collab.assign": "Thread zuweisen",
+  "collab.unassigned": "Niemandem zugewiesen",
+  "collab.comments": "Interne Kommentare",
+  "collab.noComments": "Noch keine Kommentare. @Name erwähnt Kolleg:innen.",
+  "collab.commentPlaceholder": "Interner Kommentar … (@Name erwähnt)",
+  "collab.send": "Kommentieren",
+  "thread.suggestSlots": "Termine vorschlagen",
+  "thread.slotsPending": "Slots werden gesucht …",
+  "calendar.title": "Kalender",
+  "calendar.subtitle": "Termine mit Kontext-Briefing, Fristen und Datenexport.",
+  "calendar.upcoming": "Anstehende Termine",
+  "calendar.openCase": "Vorgang öffnen",
+  "calendar.briefingBadge": "KI-Briefing",
+  "calendar.empty.title": "Keine Termine",
+  "calendar.empty.description": "Verbinde einen Google-Kalender (Runner-Sync) — Termine erscheinen hier mit automatischem Kontext-Briefing.",
+  "deadlines.title": "Fristenkalender",
+  "deadlines.every": "alle {n} Tage",
+  "deadlines.empty.title": "Keine wiederkehrenden Fristen",
+  "deadlines.empty.description": "Wiederkehrende Pflichten legst du als Aufgabe mit Wiederholung an — sie erscheinen hier.",
+  "export.title": "Datenexport",
+  "export.description": "Kompletter Export aller Org-Daten als JSON (kein Lock-in). Nur Owner/Admin.",
+  "export.button": "Export erzeugen",
+  "export.running": "Wird erzeugt …",
+  "export.done": "Export bereit ✓",
 };
 
 export function t(key: string): string {

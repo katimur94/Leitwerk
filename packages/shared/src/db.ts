@@ -183,6 +183,7 @@ export interface MailThreadRow {
   urgency: number | null;
   ai_summary: string | null;
   case_id: string | null;
+  assignee_id: string | null;
   snoozed_until: string | null;
   archived_at: string | null;
   created_at: string;

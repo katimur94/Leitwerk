@@ -6,6 +6,8 @@ import { AiBadge, Badge, Button, EmptyState, SkeletonRows } from "@leitwerk/ui";
 import { t } from "../../i18n/de";
 import { formatDateTime } from "../../lib/format";
 import { useCases } from "../cases/queries";
+import { ThreadCollaboration } from "../team/ThreadCollaboration";
+import { useRequestSlots } from "../team/queries";
 import { CATEGORY_META, categoryLabel } from "./categories";
 import { Composer } from "./Composer";
 import {
@@ -80,9 +82,11 @@ export function ThreadView({
   const correctCategory = useCorrectCategory();
   const requestAi = useRequestAiJob();
   const assignCase = useAssignThreadToCase();
+  const requestSlots = useRequestSlots();
   const cases = useCases("active");
   const [composerOpen, setComposerOpen] = useState<null | { draftId?: string }>(null);
   const [aiRequested, setAiRequested] = useState(false);
+  const [slotsRequested, setSlotsRequested] = useState(false);
 
   const lastInbound = useMemo(
     () => [...(messages.data ?? [])].reverse().find((m) => m.direction === "inbound"),
@@ -325,11 +329,30 @@ export function ThreadView({
           >
             {t("thread.summarize")}
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={requestSlots.isPending || slotsRequested}
+            onClick={() => {
+              requestSlots.mutate(thread.id);
+              setSlotsRequested(true);
+            }}
+          >
+            <span
+              aria-hidden
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: "var(--lw-ai)" }}
+            />
+            {slotsRequested ? t("thread.slotsPending") : t("thread.suggestSlots")}
+          </Button>
           {requestAi.isError ? (
             <span className="text-[12px] text-lw-danger">{requestAi.error.message}</span>
           ) : null}
         </footer>
       ) : null}
+
+      {/* Geteiltes Postfach: Zuweisung + interne Kommentare (Etappe 5) */}
+      <ThreadCollaboration threadId={thread.id} assigneeId={thread.assignee_id ?? null} />
     </div>
   );
 }
