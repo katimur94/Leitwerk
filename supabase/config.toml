@@ -1,0 +1,58 @@
+# Lokale Supabase-Konfiguration für Leitwerk (supabase start)
+project_id = "leitwerk"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+# Lokaler Mail-Catcher (Registrierungs-Mails etc.)
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+# Google-Login: Client-ID/Secret gemäß tutorials/02_google_oauth.md eintragen,
+# dann enabled = true setzen.
+# [auth.external.google]
+# enabled = true
+# client_id = "env(GOOGLE_OAUTH_CLIENT_ID)"
+# secret = "env(GOOGLE_OAUTH_CLIENT_SECRET)"
+# redirect_uri = "http://localhost:54321/auth/v1/callback"
+
+# Der Runner authentifiziert sich per Runner-Token (Hash-Vergleich),
+# nicht per Supabase-JWT — deshalb verify_jwt = false.
+[functions.runner-broker]
+verify_jwt = false
+
+[functions.build-job-context]
+verify_jwt = false
+
+# Gmail-Push (Pub/Sub) kommt ohne Supabase-JWT an.
+[functions.mail-webhook]
+verify_jwt = false
