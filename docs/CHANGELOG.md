@@ -1,5 +1,20 @@
 # Changelog
 
+## Lokale Test-Umgebung + Screenshot-Tutorial (2026-07-08)
+
+- **`tools/mock-server/`** — lokales Mock-Backend (Port 54321), das das in P0 genutzte
+  Supabase-Subset emuliert (Auth, PostgREST, runner-broker, build-job-context, Trigger,
+  Job-Queue-Logik aus 009) — komplett ohne Docker/Supabase, Daten in `data/db.json`.
+  Dazu `claude-mock.cjs` als deterministischer Ersatz für die Claude CLI.
+  **Nur für Tests/Demos — Produktion bleibt Supabase.**
+- **`tools/e2e-tutorial/run.mjs`** — Playwright-Lauf über die komplette User-Journey
+  (Registrierung → Onboarding → Pairing → Echo-Job → Dark Mode) inkl. Annotations-Renderer,
+  der nummerierte Marker + Labels direkt in die Screenshots zeichnet.
+- **`docs/testing-tutorial/`** — Tutorial mit 16 annotierten Screenshots zu jedem
+  Phase-0-Feature + Anleitung zum Starten der Mock-Umgebung.
+- E2E manuell und automatisiert verifiziert: komplette Kette
+  PWA → Queue → Runner → KI → Ergebnis läuft lokal durch.
+
 ## Phase 0 — Fundament (2026-07-08)
 
 Monorepo-Setup und kompletter Phase-0-Umfang gemäß `docs/ROADMAP_PROMPTS.md`:

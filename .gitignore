@@ -13,3 +13,5 @@ coverage/
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+tools/mock-server/data/
+tools/mock-server/tmp/

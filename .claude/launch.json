@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mock-backend",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tools/mock-server/server.mjs"],
+      "port": 54321
+    },
+    {
+      "name": "pwa",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@leitwerk/pwa", "dev"],
+      "port": 5173
+    }
+  ]
+}
