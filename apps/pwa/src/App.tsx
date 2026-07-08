@@ -4,7 +4,7 @@ import { AppShell } from "./routes/AppShell";
 import { AutomationsSettings } from "./routes/AutomationsSettings";
 import { CaseDetail } from "./routes/CaseDetail";
 import { CasesList } from "./routes/CasesList";
-import { ComingSoon } from "./routes/ComingSoon";
+import { Finance } from "./routes/Finance";
 import { Inbox } from "./routes/Inbox";
 import { Login } from "./routes/Login";
 import { MailSettings } from "./routes/MailSettings";
@@ -43,10 +43,7 @@ export function App() {
         <Route path="vorgaenge" element={<CasesList />} />
         <Route path="vorgaenge/:caseId" element={<CaseDetail />} />
         <Route path="aufgaben" element={<Tasks />} />
-        <Route
-          path="finanzen"
-          element={<ComingSoon titleKey="nav.finance" phase={3} />}
-        />
+        <Route path="finanzen" element={<Finance />} />
         <Route
           path="einstellungen"
           element={<Navigate to="/einstellungen/runner" replace />}
