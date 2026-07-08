@@ -1,5 +1,97 @@
 # Changelog
 
+## Etappe 1 — E-Mail-Hub + Vorgangsakte (2026-07-08)
+
+Kompletter Phase-1-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `018_p1_mail_hub.sql`):
+
+- **Gmail-OAuth (`oauth-gmail`):** /start (Nutzer-JWT + Org-Check, HMAC-signierter State)
+  und /callback (Code→Tokens, **Refresh-Token → Supabase Vault** über die neuen
+  Service-Role-Wrapper `vault_store_secret`/`vault_get_secret`, `mail_accounts`-Upsert,
+  Redirect zur PWA). Der Browser sieht nie ein Token.
+- **Runner-Connector `gmail-sync` (Job `sync_mail`):** Initial-Sync 90 Tage (gedeckelt
+  auf 500 Nachrichten/Lauf), Delta über die History-API (Cursor = historyId, bei 404
+  automatischer Re-Initial), MIME-/Adress-Parser mit Tests, Anhänge → Bucket
+  `attachments`. Der Runner schreibt NIE direkt in die DB: neue Edge Function
+  **`mail-sync`** (Runner-Token-Auth) mit /token (kurzlebiges Access-Token aus dem
+  Vault-Refresh-Token), /ingest (Batch-Upsert, Dedupe über Unique-Constraints) und
+  /attachment (Storage-Upload). Neuer Skill-Vertrag: optionales `execute()` für
+  Connector-Skills ohne KI-Aufruf.
+- **Serverseitige Mail-Logik (Migration 018):** Trigger `on_mail_received`
+  (Thread-Zähler/Snippet, Kontakt-Upsert aus Absender, KI-Jobs classify_email +
+  case_match idempotent einreihen, **org_rules-Ereignis `mail_received`**) und
+  `on_mail_sent_message` (Timeline + `mail_sent`); Trigger `apply_job_result`
+  wendet done-Jobs an: classify → Thread-Kategorie/Dringlichkeit + automation_run,
+  case_match → Zuordnung/Neuanlage NUR ab `min_confidence` (sonst Vorschlag),
+  draft_reply → `mail_drafts` source='ai', thread_summary → `ai_summary`.
+  `create_case` (Nummernkreis + Timeline), `assign_thread_to_case`,
+  `record_automation_outcome` (+ trust_stats-Neuberechnung),
+  `enqueue_mail_sync_jobs` (Cron alle 2 min), Realtime für Mail-Tabellen.
+- **Skills im Runner:** `classify_email`, `case_match`, `draft_reply` (erzwingt den
+  Reply-To-Empfänger gegen halluzinierte Adressen), `thread_summary` — JSON-only,
+  striktes Zod-Parsing, Kontexte datenminimiert aus `build-job-context`.
+- **Inbox-UI:** InboxRow nach DESIGN.md, Thread-Ansicht, gelesen/ungelesen, Archiv,
+  tsvector-Suche (websearch, german), j/k/e-Tastatur, Kategorie-Korrektur und
+  Vorgangs-Umhängen mit **outcome-Feedback** (Regel 5), case_match-Vorschlags-Banner
+  (AiBadge + Übernehmen/Ablehnen).
+- **Composer (Tiptap):** Neu/Antworten, Signaturen aus `mail_accounts`, Anhänge
+  (Upload in Bucket `attachments`, neue Spalte `mail_drafts.attachments`),
+  **Senden mit 30s-Rückholen** (`status='scheduled'` + `send_after`; serverseitig
+  erzwungen). Edge Function **`send-mail`**: MIME-Bau (multipart, RFC-2047-Header,
+  Reply-Header, Gmail-threadId), Nutzer-Pfad {draftId} + Cron-Pfad {mode:'due'}
+  (pg_net) — derselbe Mechanismus trägt später die Stufe-3-Halte-Zone.
+- **Vorgangsakte v1:** Liste (Filter, manuelle Anlage per `create_case`), Detail mit
+  **CaseTimeline** (neue Design-System-Komponente, violetter Punkt = KI-Eintrag),
+  verknüpfte Threads, Status-Workflow; KI-angelegte Vorgänge mit AiBadge.
+- **Einstellungen → Postfächer:** Gmail verbinden, Sync-Status live, Signatur-Editor.
+- **Mock + E2E:** Mock-Server emuliert oauth-gmail (Demo-Postfach mit 5 Beispiel-Mails),
+  eine Mini-Gmail-API für den Runner (`LEITWERK_GMAIL_API_URL`), mail-sync, send-mail,
+  alle 018-Trigger und -RPCs; claude-mock beantwortet alle 4 Skills deterministisch.
+  E2E-Journey erweitert auf 29 annotierte Screenshots — komplett grün: Verbinden →
+  Sync → Kategorien → Auto-Vorgang → KI-Entwurf → Senden mit Undo → Vorgangsakte.
+
+### Manuelle Schritte für den Betreiber (Deploy Etappe 1)
+
+1. **Google-OAuth-App** nach `tutorials/02_google_oauth.md` registrieren
+   (Scopes: `gmail.modify`, `gmail.send`; Redirect-URI:
+   `https://<PROJECT_REF>.supabase.co/functions/v1/oauth-gmail/callback`).
+2. **Migration einspielen:** `supabase db push` (neu: `018_p1_mail_hub.sql`).
+3. **Storage-Bucket anlegen** (Dashboard → Storage): `attachments` (privat).
+   Danach RLS-Policies für Client-Uploads im SQL-Editor:
+   ```sql
+   create policy "attachments_member_insert" on storage.objects for insert to authenticated
+     with check (bucket_id = 'attachments'
+       and (storage.foldername(name))[1] = 'org'
+       and public.has_org_role(((storage.foldername(name))[2])::uuid,
+             array['owner','admin','member']::public.org_role[]));
+   create policy "attachments_member_select" on storage.objects for select to authenticated
+     using (bucket_id = 'attachments'
+       and (storage.foldername(name))[1] = 'org'
+       and public.is_org_member(((storage.foldername(name))[2])::uuid));
+   ```
+4. **Function-Secrets setzen:**
+   ```bash
+   supabase secrets set GOOGLE_CLIENT_ID=…
+   supabase secrets set GOOGLE_CLIENT_SECRET=…
+   supabase secrets set OAUTH_STATE_SECRET=$(openssl rand -hex 32)
+   supabase secrets set PWA_URL=https://<deine-pwa-domain>
+   supabase secrets set PUBLIC_FUNCTIONS_URL=https://<PROJECT_REF>.supabase.co/functions/v1
+   ```
+5. **Edge Functions deployen:**
+   `supabase functions deploy oauth-gmail mail-sync send-mail build-job-context runner-broker`
+   (`verify_jwt = false` für mail-sync/oauth-gmail kommt aus `supabase/config.toml`).
+6. **pg_cron-Jobs anlegen** (SQL-Editor; pg_net-Extension aktivieren für send-due-mail):
+   ```sql
+   select cron.schedule('mail-sync', '*/2 * * * *', $$select public.enqueue_mail_sync_jobs()$$);
+   select cron.schedule('send-due-mail', '* * * * *', $$
+     select net.http_post(
+       url    := 'https://<PROJECT_REF>.supabase.co/functions/v1/send-mail',
+       headers:= jsonb_build_object('Content-Type','application/json',
+                                    'Authorization','Bearer <SERVICE_ROLE_KEY>'),
+       body   := '{"mode":"due"}'::jsonb)$$);
+   ```
+7. **PWA neu bauen/deployen:** `pnpm --filter @leitwerk/pwa build`.
+8. **Runner aktualisieren** (alle Nutzer): `npm update -g leitwerk-runner`.
+
 ## Etappe 0.5 — Security- & Robustheits-Fixes (2026-07-08)
 
 Härtung VOR dem Feature-Ausbau (Migration `017_security_hardening.sql`):

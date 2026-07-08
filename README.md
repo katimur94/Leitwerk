@@ -77,7 +77,7 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
 [lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 20 Bildern:
+mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 29 Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
 ### Anmelden & Registrieren
@@ -151,6 +151,26 @@ ausschließlich, was von der Maschine kommt.
 
 ![KI-Antwort](docs/testing-tutorial/img/17-testjob-ki-antwort.png)
 
+### E-Mail-Hub + Vorgangsakte (Etappe 1)
+
+Gmail verbinden (OAuth, Refresh-Token im Vault) → der Runner synchronisiert (Initial
+90 Tage, Delta alle 2 Minuten) → jede neue Mail wird klassifiziert (`classify_email`)
+und automatisch einem Vorgang zugeordnet oder als neuer Vorgang angelegt
+(`case_match`, Konfidenz-Gate serverseitig):
+
+![Inbox](docs/testing-tutorial/img/20-inbox.png)
+
+KI-Antwortentwürfe (`draft_reply`) landen violett markiert im Thread — gesendet wird
+nie ohne Freigabe, und jedes Senden hat ein serverseitig erzwungenes
+30-Sekunden-Rückhol-Fenster:
+
+![Senden mit Undo](docs/testing-tutorial/img/23-senden-undo.png)
+
+Die Vorgangsakte bündelt alles mit Timeline (violetter Punkt = KI-Eintrag),
+Nummernkreis und Status-Workflow:
+
+![Vorgangsakte](docs/testing-tutorial/img/26-vorgang-detail.png)
+
 ### Regel-Engine light (Einstellungen → Regeln)
 
 Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *Aktion*
@@ -158,7 +178,7 @@ Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *A
 (`evaluate_org_rules`); ab Phase 1 schleusen alle Module ihre Ereignisse
 (`mail_received`, `invoice_captured`, `quote_sent`, `payment_matched`, …) hindurch:
 
-![Regeln](docs/testing-tutorial/img/19-regel-liste.png)
+![Regeln](docs/testing-tutorial/img/28-regel-liste.png)
 
 ### App-Shell, CommandBar & Dark Mode
 
@@ -171,7 +191,7 @@ Phase 4 zur globalen Suche (Volltext + semantisch via pgvector):
 Vollwertiges dunkles Theme mit einem Klick, alle Design-Tokens aus
 [docs/DESIGN.md](docs/DESIGN.md):
 
-![Dark Mode](docs/testing-tutorial/img/20-dark-mode.png)
+![Dark Mode](docs/testing-tutorial/img/29-dark-mode.png)
 
 ---
 
@@ -183,7 +203,8 @@ Nutzbarem. Fertige Prompts pro Phase: [docs/ROADMAP_PROMPTS.md](docs/ROADMAP_PRO
 | Phase | Umfang | Status |
 |---|---|---|
 | **P0 — Fundament** | Monorepo, Migrationen, Auth + Orgs, Onboarding, Runner-Pairing, Echo-Job Ende-zu-Ende, CI | ✅ **fertig** |
-| **P1 — E-Mail-Hub** | Gmail-OAuth + Sync, Inbox (lesen/schreiben/senden mit 30s-Rückholen), `classify_email` + `case_match` + `draft_reply`, Vorgangsakte v1 → ab hier Dogfooding | ⏳ als Nächstes |
+| **P0.5 — Security-Härtung** | Zwei-Stufen-Pairing, Rate-Limits, Abo-Schutz (Limits + Nachtfenster), Regel-Engine light, `service install` | ✅ **fertig** |
+| **P1 — E-Mail-Hub** | Gmail-OAuth + Sync, Inbox (lesen/schreiben/senden mit 30s-Rückholen), `classify_email` + `case_match` + `draft_reply` + `thread_summary`, Vorgangsakte v1 → ab hier Dogfooding | ✅ **fertig** |
 | **P2 — Aufgaben & Briefing** | Aufgaben-Compiler (`extract_commitments`), Follow-up-Engine, Nacht-Wächter (`gap_scan`), Morgen-Briefing, Web-Push | geplant |
 | **P3 — Finanzen** | Eingangsrechnungs-Erfassung + Prüf-Workflow, Angebote/Rechnungen inkl. **ZUGFeRD-PDF + XRechnung-XML**, Mahnwesen, Nummernkreise | geplant |
 | **P4 — Autonomie & Wissen** | Autonomie-Regler-UI mit Trefferquoten (TrustMeter), Stufe-3-Halte-Zone, Notizen, `knowledge_distill`, semantische Suche, Meetings (Whisper lokal) | geplant |
