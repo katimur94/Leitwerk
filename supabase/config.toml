@@ -56,3 +56,12 @@ verify_jwt = false
 # Gmail-Push (Pub/Sub) kommt ohne Supabase-JWT an.
 [functions.mail-webhook]
 verify_jwt = false
+
+# Runner-authentifiziert (Runner-Token statt JWT).
+[functions.mail-sync]
+verify_jwt = false
+
+# /callback ist ein Browser-Redirect von Google (kein JWT);
+# /start prüft das Nutzer-JWT selbst via auth.getUser.
+[functions.oauth-gmail]
+verify_jwt = false

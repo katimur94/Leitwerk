@@ -48,8 +48,22 @@ export const echoContextSchema = z.object({
 });
 export type EchoContext = z.infer<typeof echoContextSchema>;
 
-/** Union wächst mit jedem Job-Typ (classify_email, case_match, … in P1). */
-export type JobContext = EchoContext;
+import type {
+  CaseMatchContext,
+  ClassifyEmailContext,
+  DraftReplyContext,
+  SyncMailContext,
+  ThreadSummaryContext,
+} from "./mail";
+
+/** Union wächst mit jedem Job-Typ. */
+export type JobContext =
+  | EchoContext
+  | ClassifyEmailContext
+  | CaseMatchContext
+  | DraftReplyContext
+  | ThreadSummaryContext
+  | SyncMailContext;
 
 // ---------- Job-Ergebnisse (striktes Zod-Parsing im Runner) ----------
 

@@ -143,3 +143,170 @@ export interface NumberRangeRow {
   next_value: number;
   padding: number;
 }
+
+// ---------- Etappe 1: Mail-Hub + Vorgangsakte ----------
+
+export interface MailAddressJson {
+  name?: string;
+  email: string;
+}
+
+export interface MailAccountRow {
+  id: string;
+  org_id: string;
+  user_id: string;
+  provider: "gmail" | "imap";
+  email_address: string;
+  display_name: string | null;
+  is_shared: boolean;
+  sync_state: "pending" | "syncing" | "ok" | "error" | "revoked";
+  sync_cursor: string | null;
+  last_sync_at: string | null;
+  last_error: string | null;
+  signature_html: string | null;
+  created_at: string;
+}
+
+export interface MailThreadRow {
+  id: string;
+  org_id: string;
+  account_id: string;
+  provider_thread_id: string;
+  subject: string | null;
+  snippet: string | null;
+  participants: MailAddressJson[];
+  message_count: number;
+  last_message_at: string | null;
+  is_unread: boolean;
+  labels: string[];
+  category: string | null;
+  urgency: number | null;
+  ai_summary: string | null;
+  case_id: string | null;
+  snoozed_until: string | null;
+  archived_at: string | null;
+  created_at: string;
+}
+
+export interface MailMessageRow {
+  id: string;
+  org_id: string;
+  thread_id: string;
+  account_id: string;
+  provider_msg_id: string;
+  direction: "inbound" | "outbound";
+  from_addr: MailAddressJson;
+  to_addrs: MailAddressJson[];
+  cc_addrs: MailAddressJson[];
+  sent_at: string | null;
+  subject: string | null;
+  body_text: string | null;
+  body_html: string | null;
+  has_attachments: boolean;
+  is_read: boolean;
+  created_at: string;
+}
+
+export interface MailAttachmentRow {
+  id: string;
+  org_id: string;
+  message_id: string;
+  filename: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  storage_path: string | null;
+  ai_kind: string | null;
+}
+
+export interface MailDraftRow {
+  id: string;
+  org_id: string;
+  account_id: string;
+  thread_id: string | null;
+  created_by: string | null;
+  source: "user" | "ai" | "automation";
+  job_id: string | null;
+  to_addrs: MailAddressJson[];
+  cc_addrs: MailAddressJson[];
+  subject: string | null;
+  body_html: string | null;
+  status: "draft" | "approved" | "scheduled" | "holding" | "sent" | "discarded";
+  send_after: string | null;
+  sent_message_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaseRow {
+  id: string;
+  org_id: string;
+  case_number: string;
+  title: string;
+  status: "open" | "waiting" | "done" | "archived";
+  company_id: string | null;
+  contact_id: string | null;
+  owner_id: string | null;
+  tags: string[];
+  reference: string | null;
+  ai_summary: string | null;
+  ai_summary_at: string | null;
+  expected_value: number | null;
+  last_activity_at: string;
+  waiting_until: string | null;
+  created_by: string | null;
+  source: "manual" | "ai_auto";
+  created_at: string;
+}
+
+export interface CaseEventRow {
+  id: number;
+  org_id: string;
+  case_id: string;
+  event_type: string;
+  title: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  actor_type: "user" | "runner" | "system";
+  actor_id: string | null;
+  occurred_at: string;
+  detail: Record<string, unknown>;
+}
+
+export interface ContactRow {
+  id: string;
+  org_id: string;
+  company_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  phone: string | null;
+  role_title: string | null;
+  source: "manual" | "mail_auto" | "import";
+  confidence: number | null;
+  created_at: string;
+}
+
+export interface AutomationRunRow {
+  id: string;
+  org_id: string;
+  automation_id: string;
+  job_id: string | null;
+  entity_type: string | null;
+  entity_id: string | null;
+  action: string;
+  autonomy_level: number;
+  confidence: number | null;
+  status:
+    | "proposed"
+    | "approved"
+    | "holding"
+    | "executed"
+    | "stopped"
+    | "rejected"
+    | "failed";
+  hold_until: string | null;
+  outcome: "correct" | "corrected" | "wrong" | null;
+  detail: Record<string, unknown>;
+  executed_at: string | null;
+  created_at: string;
+}

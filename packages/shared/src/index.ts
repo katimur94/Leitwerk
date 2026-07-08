@@ -4,3 +4,4 @@ export * from "./broker";
 export * from "./money";
 export * from "./db";
 export * from "./rules";
+export * from "./mail";
