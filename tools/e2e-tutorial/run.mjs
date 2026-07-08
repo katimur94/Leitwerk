@@ -322,11 +322,11 @@ try {
     { at: 'nav button[title="Design wechseln"]', label: "Hell/Dunkel umschalten" },
   ]);
 
-  // ---- 12 Modul-Platzhalter (Aufgaben, Phase 2) ----
-  await page.click('nav [title="Aufgaben"]');
-  await page.waitForSelector('main :text("Phase 2")');
+  // ---- 12 Modul-Platzhalter (Finanzen, Phase 3) ----
+  await page.click('nav [title="Finanzen"]');
+  await page.waitForSelector('main :text("Phase 3")');
   await capture("modul-platzhalter", [
-    { at: 'nav [title="Aufgaben"]', label: "Module sind angelegt …" },
+    { at: 'nav [title="Finanzen"]', label: "Module sind angelegt …" },
     { at: "main p", label: "… und zeigen ehrlich ihre Phase (kein leerer Screen)" },
   ]);
 
@@ -366,6 +366,12 @@ try {
     { at: 'label:has-text("Nachtfenster")', label: "Batch-Jobs nur im Nachtfenster, interaktive immer", side: "left" },
     { at: 'form:has(label:has-text("Max. Jobs pro Stunde")) button[type="submit"]', label: "Serverseitig erzwungen in claim_next_job", side: "left" },
   ]);
+  await page.locator('form:has(label:has-text("Max. Jobs pro Stunde")) button[type="submit"]').click();
+  await page.waitForSelector(':text("Gespeichert.")');
+  // Fenster wieder deaktivieren — sonst blockiert der Abo-Schutz die
+  // Nacht-Batch-Jobs (gap_scan) für den Rest des E2E-Laufs. (Beweis,
+  // dass das Gate greift, ist der Screenshot oben.)
+  await page.locator('label:has-text("Nachtfenster") input[type="checkbox"]').uncheck();
   await page.locator('form:has(label:has-text("Max. Jobs pro Stunde")) button[type="submit"]').click();
   await page.waitForSelector(':text("Gespeichert.")');
 
@@ -476,7 +482,63 @@ try {
     { at: ':text("Gesendet ✓")', label: "Nach Ablauf: Versand über die Edge Function send-mail" },
   ]);
 
-  // ---- 23 Vorgänge (Auto-Anlage durch die KI) ----
+  // ---- 25 Aufgaben-Compiler (Etappe 2) ----
+  await page.goto(`${BASE}/aufgaben`);
+  await waitFor(async () => {
+    await page.reload();
+    await sleep(1200);
+    return (await page.locator('span:has-text("aus Mail")').count()) > 0;
+  }, 90_000, "KI-Aufgabenvorschläge (extract_commitments)");
+  await page.goto(`${BASE}/aufgaben`);
+  await page.waitForSelector('span:has-text("aus Mail")');
+  // erste KI-Aufgabe aufklappen (Checkliste, Fälligkeit, Snooze)
+  await page.locator('li:has(span:has-text("aus Mail")) button').first().click();
+  await page.waitForSelector(':text("Checkliste")');
+  await capture("aufgaben", [
+    { at: 'span:has-text("aus Mail")', label: "Violett = von der KI aus einer Mail extrahiert" },
+    { at: ':text("Checkliste")', label: "Checklisten, Fälligkeit, Wiederholung, Snooze" },
+    { at: 'button:has-text("Verwerfen")', label: "Verwerfen = Feedback in die Trefferquote", side: "left" },
+    { at: 'input[placeholder="Neue Aufgabe …"]', label: "Manuell geht immer" },
+  ]);
+
+  // ---- 26 Heute: Morgen-Briefing + Wächter ----
+  await page.goto(`${BASE}/`);
+  // Badge-Span, nicht der Fallback-Text „Das nächste Morgen-Briefing …“
+  await waitFor(async () => {
+    await page.reload();
+    await sleep(1200);
+    return (await page.locator('span:text-is("Morgen-Briefing")').count()) > 0;
+  }, 120_000, "Morgen-Briefing auf der Heute-Seite");
+  await page.goto(`${BASE}/`);
+  await page.waitForSelector('span:text-is("Morgen-Briefing")');
+  await sleep(600);
+  await capture("heute-briefing", [
+    { at: 'span:has-text("Morgen-Briefing")', label: "Vom Nacht-Lauf erzeugt — violett = KI" },
+    { at: "ol li >> nth=0", label: "Nummerierte Punkte mit direkter Aktion (BriefingCard)" },
+    { at: 'h3:has-text("Wächter-Findings")', label: "gap_scan: Lücken, Widersprüche, Liegengebliebenes", side: "left" },
+  ]);
+
+  // ---- 27 Notification-Center ----
+  await page.click('nav button[title="Benachrichtigungen"]');
+  await page.waitForSelector(':text("Benachrichtigungen")');
+  await sleep(500);
+  await capture("benachrichtigungen", [
+    { at: 'nav button[title="Benachrichtigungen"]', label: "Glocke mit Ungelesen-Punkt" },
+    { at: ':text("Web-Push aktivieren")', label: "Web-Push (VAPID) — auch außerhalb der App" },
+  ]);
+  await page.keyboard.press("Escape");
+  await page.click("main");
+
+  // ---- 28 Automationen mit TrustMeter ----
+  await page.goto(`${BASE}/einstellungen/automationen`);
+  await page.waitForSelector(':text("Trefferquote")');
+  await page.waitForSelector("svg circle");
+  await capture("automationen", [
+    { at: 'li:has-text("Mails kategorisieren")', label: "TrustMeter: Trefferquote aus deinem Feedback" },
+    { at: 'p:has-text("Autonomie-Regler")', label: "Hochstufung (Stufe 1–4) kommt in Phase 4", side: "left" },
+  ]);
+
+  // ---- 29 Vorgänge (Auto-Anlage durch die KI) ----
   await page.goto(`${BASE}/vorgaenge`);
   await page.waitForSelector('main :text("V-2026-")');
   await capture("vorgaenge", [
@@ -485,7 +547,7 @@ try {
     { at: 'input[placeholder*="Titel des neuen"]', label: "Manuell anlegen geht immer", side: "left" },
   ]);
 
-  // ---- 24 Vorgangsakte mit Timeline ----
+  // ---- 30 Vorgangsakte mit Timeline ----
   await page.click('a:has-text("Sanierung")');
   await page.waitForSelector('h3:has-text("Zeitleiste")');
   await capture("vorgang-detail", [
@@ -494,7 +556,7 @@ try {
     { at: 'button:has-text("Wartet")', label: "Status: offen · wartet · erledigt · archiviert" },
   ]);
 
-  // ---- 25 Regel-Builder (Etappe 0.5) ----
+  // ---- 31 Regel-Builder (Etappe 0.5) ----
   await page.goto(`${BASE}/einstellungen/regeln`);
   await page.waitForSelector('h3:has-text("Neue Regel")');
   await page.fill("#rule-name", "Rechnungen sofort melden");
@@ -515,7 +577,7 @@ try {
     { at: 'li:has-text("Rechnungen sofort melden")', label: "Regel aktiv — pausieren oder löschen jederzeit" },
   ]);
 
-  // ---- 27 Dark Mode ----
+  // ---- 33 Dark Mode ----
   await page.click('nav button[title="Design wechseln"]');
   await sleep(400);
   await capture("dark-mode", [

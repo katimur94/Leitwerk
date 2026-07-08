@@ -45,14 +45,17 @@ export function createMailHub({ db, persist }) {
 
   function seedDemoMailbox(email) {
     if (db.mock_gmail[email]) return;
+    // Mail 2 (Rechnung) ist bewusst 3 Tage alt → der Nacht-Wächter findet
+    // eine unbeantwortete Mail (gap_scan-Demo); Rest wenige Stunden.
     const base = Date.now() - 3 * 60 * 60_000;
+    const ageMs = (index) => (index === 1 ? 3.2 * 86_400_000 : (3 - index * 0.4) * 60 * 60_000);
     db.mock_gmail[email] = {
       historyId: DEMO_MAILS.length + 1,
       messages: DEMO_MAILS.map((mail, index) => ({
         id: `mock-msg-${index + 1}`,
         threadId: `mock-thr-${index + 1}`,
         labelIds: ["INBOX", "UNREAD"],
-        internalDate: String(base + index * 25 * 60_000),
+        internalDate: String(Date.now() - ageMs(index)),
         historySeq: index + 1,
         payload: {
           mimeType: "text/plain",
@@ -278,6 +281,39 @@ export function createMailHub({ db, persist }) {
       )) {
         pushJob(message.org_id, "case_match", { thread_id: thread.id, message_id: message.id });
       }
+      // Etappe 2: Aufgaben-Compiler
+      if (hasAuto("auto_extract_tasks") && !db.agent_jobs.some(
+        (j) => j.job_type === "extract_commitments" && j.payload?.message_id === message.id,
+      )) {
+        pushJob(message.org_id, "extract_commitments", { message_id: message.id, thread_id: thread.id }, 6);
+      }
+      // Etappe 2: Antwort eingetroffen → Follow-ups erledigen
+      for (const followup of db.followups.filter(
+        (f) => f.entity_type === "mail_thread" && f.entity_id === thread.id && f.status === "waiting",
+      )) {
+        Object.assign(followup, { status: "answered", answered_at: now() });
+      }
+    } else {
+      // Etappe 2: Follow-up bei ausgehender Mail (auto_followup)
+      if (db.automations.some(
+        (a) => a.org_id === message.org_id && a.key === "auto_followup" && a.is_enabled !== false,
+      )) {
+        const existing = db.followups.find(
+          (f) => f.entity_type === "mail_thread" && f.entity_id === thread.id,
+        );
+        const expected = new Date(Date.now() + 4 * 86_400_000).toISOString();
+        if (existing) {
+          Object.assign(existing, { expected_by: expected, status: "waiting", answered_at: null });
+        } else {
+          db.followups.push({
+            id: randomUUID(), org_id: message.org_id, case_id: thread.case_id,
+            entity_type: "mail_thread", entity_id: thread.id, expected_by: expected,
+            reason: "Standard-Nachfassfrist nach ausgehender Mail", status: "waiting",
+            reminder_draft_id: null, answered_at: null, created_by: "ai",
+            created_at: now(), updated_at: now(),
+          });
+        }
+      }
     }
     if (thread.case_id) {
       pushCaseEvent(message.org_id, thread.case_id,
@@ -456,6 +492,111 @@ export function createMailHub({ db, persist }) {
         thread.ai_summary = result.summary ?? null;
         thread.updated_at = now();
       }
+    } else if (job.job_type === "extract_commitments") {
+      const thread = db.mail_threads.find((t) => t.id === job.payload?.thread_id);
+      const automation = db.automations.find(
+        (a) => a.org_id === job.org_id && a.key === "auto_extract_tasks",
+      );
+      for (const item of result.commitments ?? []) {
+        if (db.tasks.some(
+          (t) => t.org_id === job.org_id && t.source === "mail_extract" &&
+            t.source_entity_id === job.payload?.message_id && t.title === item.title,
+        )) continue;
+        const task = {
+          id: randomUUID(), org_id: job.org_id, case_id: thread?.case_id ?? null,
+          title: item.title, description: item.reason ?? null, status: "open",
+          due_at: item.due_at ?? null, assignee_id: null, created_by: null,
+          source: "mail_extract", source_entity_type: "mail_message",
+          source_entity_id: job.payload?.message_id ?? null, job_id: job.id,
+          recurrence: null, completed_at: null, created_at: now(), updated_at: now(),
+        };
+        db.tasks.push(task);
+        evaluateRules(job.org_id, "task_created", {
+          entity_type: "task", entity_id: task.id, title: task.title, source: task.source,
+        });
+        if (automation) {
+          db.automation_runs.push({
+            id: randomUUID(), org_id: job.org_id, automation_id: automation.id, job_id: job.id,
+            entity_type: "task", entity_id: task.id,
+            action: `Aufgabe vorgeschlagen: ${task.title}`,
+            autonomy_level: automation.autonomy_level ?? 1,
+            confidence: item.confidence ?? 0.9, status: "executed", hold_until: null,
+            decided_by: null, outcome: null, outcome_by: null, outcome_at: null,
+            detail: item, executed_at: now(), created_at: now(),
+          });
+        }
+      }
+    } else if (job.job_type === "gap_scan") {
+      for (const item of result.findings ?? []) {
+        if (db.agent_findings.some(
+          (f) => f.org_id === job.org_id && f.dedupe_key === item.dedupe_key,
+        )) continue;
+        const finding = {
+          id: randomUUID(), org_id: job.org_id, case_id: item.case_id ?? null,
+          kind: item.kind, severity: item.severity, title: item.title,
+          description: item.description ?? null, suggested_action: item.suggested_action ?? null,
+          entity_type: null, entity_id: null, job_id: job.id, status: "open",
+          resolved_by: null, resolved_at: null, dedupe_key: item.dedupe_key,
+          created_at: now(),
+        };
+        db.agent_findings.push(finding);
+        evaluateRules(job.org_id, "finding_created", {
+          entity_type: "agent_finding", entity_id: finding.id,
+          kind: finding.kind, severity: finding.severity, title: finding.title,
+        });
+        if (finding.severity <= 2) {
+          for (const member of db.org_members.filter((m) => m.org_id === job.org_id && m.is_active)) {
+            db.notifications.push({
+              id: randomUUID(), org_id: job.org_id, user_id: member.user_id, kind: "finding",
+              title: finding.title, body: finding.description, entity_type: "agent_finding",
+              entity_id: finding.id, read_at: null, pushed_at: null, created_at: now(),
+            });
+          }
+        }
+      }
+    } else if (job.job_type === "morning_briefing") {
+      const today = now().slice(0, 10);
+      if (!db.briefings.some(
+        (b) => b.org_id === job.org_id && b.kind === "morning" && b.for_date === today,
+      )) {
+        db.briefings.push({
+          id: randomUUID(), org_id: job.org_id, user_id: null, kind: "morning",
+          for_date: today, content_md: result.content_md ?? "",
+          items: result.items ?? [], job_id: job.id, read_at: null, created_at: now(),
+        });
+        for (const member of db.org_members.filter((m) => m.org_id === job.org_id && m.is_active)) {
+          db.notifications.push({
+            id: randomUUID(), org_id: job.org_id, user_id: member.user_id, kind: "briefing",
+            title: "Dein Morgen-Briefing ist da", body: null, entity_type: "briefing",
+            entity_id: null, read_at: null, pushed_at: null, created_at: now(),
+          });
+        }
+      }
+    } else if (job.job_type === "followup_check") {
+      for (const item of result.followups ?? []) {
+        const followup = db.followups.find((f) => f.id === item.followup_id);
+        if (!followup || followup.status !== "waiting" || item.action !== "escalate") continue;
+        followup.status = "escalated";
+        if (!db.agent_findings.some(
+          (f) => f.org_id === job.org_id && f.dedupe_key === `followup:${followup.id}`,
+        )) {
+          db.agent_findings.push({
+            id: randomUUID(), org_id: job.org_id, case_id: followup.case_id,
+            kind: "stale", severity: 2, title: item.title ?? "Antwort überfällig",
+            description: item.description ?? null, suggested_action: null,
+            entity_type: "mail_thread", entity_id: followup.entity_id, job_id: job.id,
+            status: "open", resolved_by: null, resolved_at: null,
+            dedupe_key: `followup:${followup.id}`, created_at: now(),
+          });
+        }
+        if (item.draft_instructions) {
+          pushJob(job.org_id, "draft_reply", {
+            thread_id: followup.entity_id,
+            instructions: item.draft_instructions,
+            source: "automation",
+          }, 6);
+        }
+      }
     }
     persist();
   }
@@ -543,6 +684,110 @@ export function createMailHub({ db, persist }) {
               body_excerpt: (m.body_text ?? "").slice(0, 1200),
             })),
         };
+      case "extract_commitments": {
+        if (!message) return null;
+        return {
+          jobId: job.id, jobType: "extract_commitments", locale: "de-DE",
+          today: now().slice(0, 10),
+          message: {
+            subject: message.subject ?? "", from: message.from_addr,
+            body_excerpt: (message.body_text ?? "").slice(0, 4000),
+            sent_at: message.sent_at,
+          },
+          existing_tasks: db.tasks
+            .filter((t) => t.source_entity_id === message.id)
+            .map((t) => t.title),
+        };
+      }
+      case "gap_scan": {
+        const dayMs = 86_400_000;
+        const days = (iso) => (iso ? Math.floor((Date.now() - Date.parse(iso)) / dayMs) : 0);
+        return {
+          jobId: job.id, jobType: "gap_scan", locale: "de-DE", today: now().slice(0, 10),
+          stale_cases: db.cases
+            .filter((c) => c.org_id === job.org_id && ["open", "waiting"].includes(c.status) &&
+              days(c.last_activity_at) >= 5)
+            .slice(0, 15)
+            .map((c) => ({
+              case_id: c.id, case_number: c.case_number, title: c.title,
+              status: c.status, days_inactive: days(c.last_activity_at),
+            })),
+          unanswered_threads: db.mail_threads
+            .filter((t) => t.org_id === job.org_id && t.is_unread && !t.archived_at &&
+              days(t.last_message_at) >= 2)
+            .slice(0, 15)
+            .map((t) => ({
+              thread_id: t.id, subject: t.subject ?? "",
+              from: t.participants?.[0]?.email ?? "",
+              days_waiting: days(t.last_message_at), urgency: t.urgency,
+            })),
+          overdue_followups: db.followups.filter(
+            (f) => f.org_id === job.org_id && f.status === "waiting" && f.expected_by < now(),
+          ).length,
+          overdue_tasks: db.tasks.filter(
+            (t) => t.org_id === job.org_id && ["open", "in_progress"].includes(t.status) &&
+              t.due_at && t.due_at < now(),
+          ).length,
+        };
+      }
+      case "morning_briefing": {
+        const org = db.orgs.find((o) => o.id === job.org_id);
+        const unread = db.mail_threads.filter(
+          (t) => t.org_id === job.org_id && t.is_unread && !t.archived_at,
+        );
+        const dueTasks = db.tasks.filter(
+          (t) => t.org_id === job.org_id && ["open", "in_progress"].includes(t.status),
+        ).slice(0, 5);
+        const findings = db.agent_findings.filter(
+          (f) => f.org_id === job.org_id && f.status === "open",
+        ).slice(0, 5);
+        return {
+          jobId: job.id, jobType: "morning_briefing", locale: "de-DE",
+          for_date: now().slice(0, 10), org_name: org?.name ?? "",
+          stats: {
+            unread_threads: unread.length,
+            urgent_threads: unread.filter((t) => (t.urgency ?? 5) <= 2).length,
+            due_tasks: dueTasks.length,
+            overdue_followups: db.followups.filter(
+              (f) => f.org_id === job.org_id && f.status === "waiting" && f.expected_by < now(),
+            ).length,
+            open_findings: findings.length,
+          },
+          top_items: [
+            ...unread.slice(0, 4).map((t) => ({
+              entity_type: "mail_thread", entity_id: t.id,
+              title: t.subject ?? "(kein Betreff)", detail: "ungelesen",
+            })),
+            ...dueTasks.slice(0, 3).map((t) => ({
+              entity_type: "task", entity_id: t.id, title: t.title, detail: "offene Aufgabe",
+            })),
+            ...findings.slice(0, 3).map((f) => ({
+              entity_type: "agent_finding", entity_id: f.id, title: f.title,
+              detail: `Severity ${f.severity}`,
+            })),
+          ].slice(0, 12),
+        };
+      }
+      case "followup_check": {
+        return {
+          jobId: job.id, jobType: "followup_check", locale: "de-DE",
+          today: now().slice(0, 10),
+          overdue: db.followups
+            .filter((f) => f.org_id === job.org_id && f.status === "waiting" &&
+              f.entity_type === "mail_thread" && f.expected_by < now())
+            .slice(0, 20)
+            .map((f) => {
+              const thread = db.mail_threads.find((t) => t.id === f.entity_id);
+              return {
+                followup_id: f.id, thread_id: f.entity_id,
+                subject: thread?.subject ?? "",
+                counterpart: thread?.participants?.[0]?.email ?? "",
+                expected_by: f.expected_by,
+                days_overdue: Math.max(0, Math.floor((Date.now() - Date.parse(f.expected_by)) / 86_400_000)),
+              };
+            }),
+        };
+      }
       default:
         return null;
     }
@@ -604,13 +849,33 @@ export function createMailHub({ db, persist }) {
       const run = db.automation_runs.find((r) => r.id === body.p_run_id);
       if (!run) return [400, { message: "automation_run nicht gefunden" }];
       Object.assign(run, { outcome: body.p_outcome, outcome_by: user?.id ?? null, outcome_at: now() });
+      // trust_stats neu berechnen (Spiegel von Migration 018)
+      const runs = db.automation_runs.filter(
+        (r) => r.automation_id === run.automation_id && r.outcome,
+      );
+      const last50 = [...runs]
+        .sort((a, b) => (a.outcome_at > b.outcome_at ? -1 : 1))
+        .slice(0, 50);
+      const stats = {
+        automation_id: run.automation_id,
+        org_id: run.org_id,
+        total_runs: runs.length,
+        correct_runs: runs.filter((r) => r.outcome === "correct").length,
+        last_50_correct: last50.filter((r) => r.outcome === "correct").length,
+        last_50_total: last50.length,
+        accuracy: runs.length ? runs.filter((r) => r.outcome === "correct").length / runs.length : null,
+        updated_at: now(),
+      };
+      const existing = db.trust_stats.find((s) => s.automation_id === run.automation_id);
+      if (existing) Object.assign(existing, stats);
+      else db.trust_stats.push(stats);
       persist();
       return [204, null];
     }
     return null;
   }
 
-  // ---------- Cron-Ersatz: Sync-Jobs alle 30 s ----------
+  // ---------- Cron-Ersatz: Sync alle 30 s + Wächter/Briefing/Follow-ups ----------
   function enqueueSyncJobs() {
     for (const account of db.mail_accounts.filter(
       (a) => a.provider === "gmail" && ["pending", "ok", "error"].includes(a.sync_state),
@@ -624,6 +889,30 @@ export function createMailHub({ db, persist }) {
       );
       if (hasRunner && !pending) {
         pushJob(account.org_id, "sync_mail", { account_id: account.id }, 6);
+      }
+    }
+
+    // Etappe 2: Watchdog-Jobs pro Org (im Mock aggressiv statt nachts,
+    // damit die Demo sofort etwas zeigt; Dedupe passiert in der Anwendung)
+    const fiveMinAgo = new Date(Date.now() - 5 * 60_000).toISOString();
+    for (const org of db.orgs) {
+      const hasRunner = db.runners.some(
+        (r) => r.org_id === org.id && !["disabled", "pending_approval"].includes(r.status),
+      );
+      const hasMail = db.mail_threads.some((t) => t.org_id === org.id);
+      if (!hasRunner || !hasMail) continue;
+      // Prioritäten wie im echten Cron (009/019): Briefing 6, Follow-ups 7,
+      // Wächter 8 (Nacht-Batch → respektiert das Nachtfenster)
+      for (const [jobType, priority] of [
+        ["morning_briefing", 6],
+        ["followup_check", 7],
+        ["gap_scan", 8],
+      ]) {
+        const recent = db.agent_jobs.some(
+          (j) => j.org_id === org.id && j.job_type === jobType &&
+            (["queued", "claimed", "running"].includes(j.status) || j.created_at > fiveMinAgo),
+        );
+        if (!recent) pushJob(org.id, jobType, { scope: "org" }, priority);
       }
     }
     persist();

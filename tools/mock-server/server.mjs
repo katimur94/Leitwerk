@@ -51,6 +51,13 @@ const emptyDb = () => ({
   companies: [],
   automation_runs: [],
   trust_stats: [],
+  // Etappe 2: Aufgaben, Wächter, Briefing, Follow-ups, Push
+  task_checklist_items: [],
+  followups: [],
+  agent_findings: [],
+  briefings: [],
+  push_subscriptions: [],
+  snoozes: [],
 });
 
 // Rate-Limit auf /pair (Migration 017) — Fenster pro Minute, im Speicher.
@@ -210,6 +217,37 @@ const tableDefaults = {
     created_by: null,
     created_at: now(),
     updated_at: now(),
+  }),
+  tasks: () => ({
+    id: randomUUID(),
+    case_id: null,
+    description: null,
+    status: "open",
+    due_at: null,
+    assignee_id: null,
+    created_by: null,
+    source: "manual",
+    source_entity_type: null,
+    source_entity_id: null,
+    job_id: null,
+    recurrence: null,
+    completed_at: null,
+    created_at: now(),
+    updated_at: now(),
+  }),
+  task_checklist_items: () => ({
+    id: randomUUID(),
+    is_done: false,
+    position: 0,
+  }),
+  snoozes: () => ({
+    id: randomUUID(),
+    created_at: now(),
+  }),
+  push_subscriptions: () => ({
+    id: randomUUID(),
+    user_agent: null,
+    created_at: now(),
   }),
   agent_jobs: () => ({
     id: randomUUID(),
@@ -472,6 +510,12 @@ function applySelect(table, rows, url) {
       const automation = db.automations.find((a) => a.id === row.automation_id);
       return { ...row, automations: automation ? { key: automation.key } : null };
     });
+  }
+  if (table === "automations" && select.includes("trust_stats")) {
+    return rows.map((row) => ({
+      ...row,
+      trust_stats: db.trust_stats.find((s) => s.automation_id === row.id) ?? null,
+    }));
   }
   return rows;
 }

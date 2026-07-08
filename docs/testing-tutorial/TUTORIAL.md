@@ -160,8 +160,8 @@ sinnvollen Schritt. **(4)** Einstellungen und **(5)** Theme-Umschalter unten in 
 ![Modul-Platzhalter](img/12-modul-platzhalter.png)
 
 **(1)** Alle Module sind navigierbar, **(2)** noch nicht gebaute zeigen statt leerer
-Flächen einen Empty-State mit ihrer Phase (Aufgaben → Phase 2, Finanzen → Phase 3).
-Posteingang und Vorgänge sind seit Etappe 1 produktiv (Abschnitte 18–26).
+Flächen einen Empty-State mit ihrer Phase (Finanzen → Phase 3). Posteingang, Vorgänge
+(Etappe 1) und Aufgaben (Etappe 2) sind produktiv — Abschnitte 18–30.
 Kein Feature ohne Empty-State — Regel 9 aus `CLAUDE.md`.
 
 ## 13 · CommandBar (Strg/Cmd + K)
@@ -282,26 +282,64 @@ die Mail zurück (Status zurück auf Entwurf).
 Anhängen und Reply-Headern); die Outbound-Nachricht landet im Thread und in der
 Vorgangs-Timeline (`mail_out`).
 
-## 25 · Vorgänge
+## 25 · Aufgaben-Compiler (Etappe 2)
 
-![Vorgänge](img/25-vorgaenge.png)
+![Aufgaben](img/25-aufgaben.png)
+
+**(1)** `extract_commitments` übersetzt jede eingehende Mail in konkrete
+Aufgaben-Vorschläge (source `mail_extract`, violett markiert). **(2)** Jede Aufgabe hat
+Checklisten, Fälligkeit, einfache Wiederholung (alle N Tage) und 3-Tage-Snooze.
+**(3)** „Verwerfen“ storniert den Vorschlag und meldet `outcome='wrong'` in die
+Trefferquote (Regel 5). **(4)** Manuelle Aufgaben gehen jederzeit.
+
+## 26 · Heute: Morgen-Briefing + Nacht-Wächter
+
+![Heute](img/26-heute-briefing.png)
+
+**(1)** `morning_briefing` fasst den Tag zusammen — violettes Badge = KI-Herkunft.
+**(2)** Die BriefingCards (DESIGN.md Kernkomponente 9): nummerierte Punkte mit direkter
+Aktion pro Punkt. **(3)** Darunter die Wächter-Findings aus `gap_scan` (hier: die
+3 Tage unbeantwortete Rechnung) mit Erledigt/Verwerfen und die überfälligen Follow-ups
+(`followup_check` eskaliert und erzeugt automatisch Nachfass-Entwürfe).
+
+## 27 · Notification-Center + Web-Push
+
+![Benachrichtigungen](img/27-benachrichtigungen.png)
+
+**(1)** Die Glocke in der Icon-Rail zeigt Ungelesenes; das Panel listet Findings,
+Briefings und Zuweisungen. **(2)** Web-Push (VAPID): einmal aktivieren, dann stellt
+die Edge Function `send-push` Benachrichtigungen auch außerhalb der App zu
+(pg_cron + pg_net, notifications.pushed_at als Queue).
+
+## 28 · Automationen mit TrustMeter
+
+![Automationen](img/28-automationen.png)
+
+**(1)** Jede Automation zeigt ihre Trefferquote als TrustMeter-Ring (rollierendes
+50er-Fenster aus `trust_stats`, gespeist von deinem Feedback). Grün wird der Ring
+erst ab der Hochstufungs-Schwelle — der Autonomie-Regler selbst folgt in Phase 4.
+**(2)** Ehrlicher Hinweis statt vorgezogener Regler.
+
+## 29 · Vorgänge
+
+![Vorgänge](img/29-vorgaenge.png)
 
 **(1)** Vorgänge mit Nummernkreis (`V-2026-…`), Status und letzter Aktivität.
 **(2)** Von der KI angelegte Vorgänge tragen das violette Badge „KI-angelegt“.
 **(3)** Manuell anlegen geht jederzeit (RPC `create_case`).
 
-## 26 · Vorgangsakte
+## 30 · Vorgangsakte
 
-![Vorgangsakte](img/26-vorgang-detail.png)
+![Vorgangsakte](img/30-vorgang-detail.png)
 
 **(1)** Die CaseTimeline: jedes Ereignis (Anlage, Mail ein/aus, Verknüpfung) mit
 Zeitstempel — **violetter Punkt = KI-Eintrag** (eiserne Design-Regel).
 **(2)** Verknüpfte E-Mail-Threads; ab Phase 2/3 hängen hier auch Aufgaben und Belege.
 **(3)** Status-Wechsel direkt in der Akte.
 
-## 27 · Regel-Builder (Einstellungen → Regeln)
+## 31 · Regel-Builder (Einstellungen → Regeln)
 
-![Regel-Builder](img/27-regel-builder.png)
+![Regel-Builder](img/31-regel-builder.png)
 
 Die Regel-Engine light (Etappe 0.5): **(1)** Jede Regel folgt dem Muster „Wenn
 *Ereignis* und *Bedingungen*, dann *Aktion*“. **(2)** Ereignisse wie `mail_received`,
@@ -310,17 +348,17 @@ Modulen ausgelöst. **(3)** Bedingungen prüfen Felder der Entity (UND-verknüpf
 von „ist gleich“ bis „fehlt“). **(4)** Ausgewertet wird serverseitig durch die
 Postgres-Funktion `evaluate_org_rules` — Aktionen: Benachrichtigung, Aufgabe oder KI-Job.
 
-## 28 · Regel aktiv
+## 32 · Regel aktiv
 
-![Regel-Liste](img/28-regel-liste.png)
+![Regel-Liste](img/32-regel-liste.png)
 
 **(1)** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede Ausführung
 landet im Audit-Log (`rule.executed`). Seit Etappe 1 feuern `mail_received` und
 `mail_sent` bei jeder synchronisierten bzw. gesendeten Nachricht durch die Engine.
 
-## 29 · Dark Mode
+## 33 · Dark Mode
 
-![Dark Mode](img/29-dark-mode.png)
+![Dark Mode](img/33-dark-mode.png)
 
 **(1)** Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um
 (alle Design-Tokens aus `DESIGN.md`, inklusive angepasster Marken- und KI-Farben).
@@ -328,7 +366,7 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ---
 
-## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappe 0.5 + Etappe 1)
+## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1 und 2)
 
 1. Registrierung → Org-Anlage → Onboarding-Wizard mit Stammdaten aus `org_profile` ✓
 2. Runner-Pairing über Pairing-Code + Token-Hash, gehärtet mit Rate-Limit,
@@ -339,7 +377,12 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 6. **Etappe 1:** Postfach verbinden → Runner-Sync → `classify_email` (Kategorien in der
    Inbox) → `case_match` (Auto-Vorgang mit Nummernkreis) → `draft_reply` (KI-Entwurf) →
    Senden mit 30s-Rückholen → Outbound in Thread + Vorgangs-Timeline ✓
-7. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
+7. **Etappe 2:** `extract_commitments` (Aufgaben-Vorschläge mit Feedback), `gap_scan`
+   (Wächter-Finding zur 3 Tage unbeantworteten Mail), `morning_briefing` (BriefingCards
+   auf „Heute“), Follow-up-Engine (Anlage bei Send, Erledigung bei Antwort),
+   Notification-Center, TrustMeter ✓ — inklusive Beweis, dass das Nachtfenster
+   Priority-8-Jobs tagsüber blockiert
+8. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
 
 Gegen echtes Supabase ist der Ablauf identisch — nur dass `supabase start` die
 Datenbank stellt, die Edge Functions in Deno laufen und Updates per Realtime statt
