@@ -6,6 +6,12 @@ export interface Skill {
   /** Job-Typ, z. B. 'echo', 'classify_email', … */
   type: string;
   /**
+   * Kompakte Beschreibung des erwarteten JSON-Formats — wird beim
+   * Reparatur-Retry gesendet (NICHT der komplette Original-Prompt,
+   * Etappe 0.5: Token sparen).
+   */
+  schemaDescription: string;
+  /**
    * Baut den Prompt aus dem serverseitig gelieferten Kontext.
    * null = kein KI-Aufruf nötig (reiner Sync-Job) → parse("", ctx).
    * Prompts verlangen IMMER reines JSON (kein Markdown).

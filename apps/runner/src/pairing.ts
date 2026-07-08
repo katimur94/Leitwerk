@@ -3,8 +3,10 @@ import { hostname } from "node:os";
 import {
   PAIRING_CODE_ALPHABET,
   PAIRING_CODE_LENGTH,
+  RUNNER_PAIR_POLL_INTERVAL_MS,
+  RUNNER_PENDING_APPROVAL_POLL_MS,
 } from "@leitwerk/shared";
-import { BrokerClient } from "./broker";
+import { BrokerClient, BrokerHttpError } from "./broker";
 import { configPath, saveConfig, type RunnerConfig } from "./config";
 import { runCli } from "./providers/run-cli";
 import type { ProviderKind } from "./providers";
@@ -72,12 +74,24 @@ export async function runInit(functionsUrl: string): Promise<void> {
 
   const deadline = Date.now() + 10 * 60_000;
   while (Date.now() < deadline) {
-    const response = await broker.pair({
-      code,
-      name: hostname(),
-      provider,
-      version: VERSION,
-    });
+    let response;
+    try {
+      response = await broker.pair({
+        code,
+        name: hostname(),
+        provider,
+        version: VERSION,
+      });
+    } catch (error) {
+      // Rate-Limit (10 Versuche/IP/Minute): warten und weiterpollen
+      if (error instanceof BrokerHttpError && error.status === 429) {
+        const waitSec = error.retryAfterSec ?? 60;
+        log.warn(`Rate-Limit erreicht — warte ${waitSec}s …`);
+        await sleep(waitSec * 1_000);
+        continue;
+      }
+      throw error;
+    }
     if (response.status === "paired") {
       const config: RunnerConfig = {
         functionsUrl,
@@ -89,12 +103,49 @@ export async function runInit(functionsUrl: string): Promise<void> {
       saveConfig(config);
       log.info("Pairing erfolgreich ✓");
       log.info(`Konfiguration gespeichert: ${configPath()}`);
-      log.info("Starte den Runner jetzt mit:  leitwerk-runner start");
+      if (response.pendingApproval) {
+        await waitForApproval(config);
+      } else {
+        log.info("Starte den Runner jetzt mit:  leitwerk-runner start");
+      }
       return;
     }
-    await sleep(3_000);
+    // Intervall bewusst > 6 s: bleibt unter dem IP-Rate-Limit des Brokers
+    await sleep(RUNNER_PAIR_POLL_INTERVAL_MS);
   }
   throw new Error(
     "Pairing-Code abgelaufen (10 Minuten). Starte `leitwerk-runner init` erneut.",
+  );
+}
+
+/**
+ * Zwei-Stufen-Pairing (Etappe 0.5): Der Runner ist gepairt, aber erst nach
+ * Bestätigung in der PWA (Einstellungen → Runner) darf er Jobs claimen.
+ * Wir warten hier bis zu 15 Minuten auf die Freigabe — danach reicht
+ * `leitwerk-runner start`, das ebenfalls auf die Freigabe wartet.
+ */
+async function waitForApproval(config: RunnerConfig): Promise<void> {
+  const broker = new BrokerClient(config.functionsUrl, {
+    runnerId: config.runnerId,
+    runnerToken: config.runnerToken,
+  });
+  log.info("Dieser Runner wartet auf deine Freigabe:");
+  log.info("  Leitwerk-PWA → Einstellungen → Runner → „Bestätigen“");
+
+  const deadline = Date.now() + 15 * 60_000;
+  while (Date.now() < deadline) {
+    const status = await broker.status().catch(() => null);
+    if (status === "online" || status === "offline") {
+      log.info("Runner freigegeben ✓");
+      log.info("Starte den Runner jetzt mit:  leitwerk-runner start");
+      return;
+    }
+    if (status === "disabled") {
+      throw new Error("Der Runner wurde in der PWA abgelehnt/deaktiviert.");
+    }
+    await sleep(RUNNER_PENDING_APPROVAL_POLL_MS);
+  }
+  log.warn(
+    "Noch keine Freigabe. Du kannst trotzdem `leitwerk-runner start` ausführen — der Runner wartet dann auf die Bestätigung.",
   );
 }

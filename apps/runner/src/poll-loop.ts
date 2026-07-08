@@ -1,5 +1,8 @@
-import { RUNNER_POLL_INTERVAL_MS } from "@leitwerk/shared";
-import { BrokerClient } from "./broker";
+import {
+  RUNNER_PENDING_APPROVAL_POLL_MS,
+  RUNNER_POLL_INTERVAL_MS,
+} from "@leitwerk/shared";
+import { BrokerClient, BrokerHttpError } from "./broker";
 import type { RunnerConfig } from "./config";
 import { executeJob } from "./job-runner";
 import { createProvider } from "./providers";
@@ -35,10 +38,12 @@ export async function runLoop(config: RunnerConfig): Promise<void> {
   process.on("SIGTERM", stop);
 
   let consecutiveErrors = 0;
+  let approvalHintShown = false;
   while (!stopping) {
     try {
       const job = await broker.claim();
       consecutiveErrors = 0;
+      approvalHintShown = false;
       if (!job) {
         await sleep(RUNNER_POLL_INTERVAL_MS);
         continue;
@@ -48,6 +53,22 @@ export async function runLoop(config: RunnerConfig): Promise<void> {
       );
       await executeJob(job, { broker, provider });
     } catch (error) {
+      // Zwei-Stufen-Pairing: noch nicht freigegeben → geduldig warten
+      if (error instanceof BrokerHttpError && error.code === "pending_approval") {
+        if (!approvalHintShown) {
+          log.warn("Runner wartet auf Freigabe: PWA → Einstellungen → Runner → „Bestätigen“");
+          approvalHintShown = true;
+        }
+        consecutiveErrors = 0;
+        await sleep(RUNNER_PENDING_APPROVAL_POLL_MS);
+        continue;
+      }
+      // Abgelehnt/deaktiviert → beenden, sonst hämmert der Runner sinnlos weiter
+      if (error instanceof BrokerHttpError && error.code === "runner_disabled") {
+        log.error("Runner wurde in der PWA deaktiviert. Neues Pairing: leitwerk-runner init");
+        process.exitCode = 1;
+        return;
+      }
       consecutiveErrors += 1;
       const backoff = Math.min(60_000, RUNNER_POLL_INTERVAL_MS * consecutiveErrors);
       log.error(`Poll-Fehler: ${String(error)} — nächster Versuch in ${backoff / 1000}s`);

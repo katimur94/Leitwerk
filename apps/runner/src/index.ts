@@ -1,6 +1,7 @@
 import { configPath, loadConfig } from "./config";
 import { runInit } from "./pairing";
 import { runLoop } from "./poll-loop";
+import { runServiceCommand } from "./service";
 import { log } from "./util/log";
 import { VERSION } from "./version";
 
@@ -11,6 +12,9 @@ Befehle:
   init [--url <functions-url>]   Runner mit deinem Leitwerk-Konto verbinden (Pairing)
   start                          Job-Verarbeitung starten
   status                         Aktuelle Konfiguration anzeigen
+  service install|uninstall|status
+                                 Als Autostart-Dienst einrichten
+                                 (Linux: systemd · macOS: launchd · Windows: schtasks)
   help                           Diese Hilfe
 
 Die Functions-URL kommt aus --url oder der Umgebungsvariable LEITWERK_FUNCTIONS_URL,
@@ -50,6 +54,10 @@ async function main(): Promise<void> {
       await runLoop(config);
       break;
     }
+
+    case "service":
+      runServiceCommand(args[0]);
+      break;
 
     case "status": {
       const config = loadConfig();

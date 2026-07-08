@@ -7,15 +7,30 @@ import {
   claimResponseSchema,
   contextResponseSchema,
   pairResponseSchema,
+  runnerStatusResponseSchema,
   type AgentJob,
   type Json,
   type PairRequest,
   type PairResponse,
+  type RunnerStatusResponse,
 } from "@leitwerk/shared";
 
 export interface BrokerAuth {
   runnerId: string;
   runnerToken: string;
+}
+
+/** Typisierter Broker-Fehler mit HTTP-Status und maschinenlesbarem Code. */
+export class BrokerHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly retryAfterSec?: number,
+  ) {
+    super(message);
+    this.name = "BrokerHttpError";
+  }
 }
 
 export class BrokerClient {
@@ -44,8 +59,12 @@ export class BrokerClient {
     const data: unknown = await res.json().catch(() => ({}));
     if (!res.ok) {
       const parsed = brokerErrorSchema.safeParse(data);
-      throw new Error(
+      const retryAfter = Number(res.headers.get("retry-after") ?? "") || undefined;
+      throw new BrokerHttpError(
         parsed.success ? parsed.data.error : `Broker HTTP ${res.status}`,
+        res.status,
+        parsed.success ? parsed.data.code : undefined,
+        retryAfter,
       );
     }
     return data;
@@ -55,6 +74,13 @@ export class BrokerClient {
     return pairResponseSchema.parse(
       await this.post("runner-broker", "/pair", request),
     );
+  }
+
+  /** Selbstauskunft — funktioniert auch, solange der Runner auf Freigabe wartet. */
+  async status(): Promise<RunnerStatusResponse["status"]> {
+    return runnerStatusResponseSchema.parse(
+      await this.post("runner-broker", "/status", {}),
+    ).status;
   }
 
   async claim(): Promise<AgentJob | null> {

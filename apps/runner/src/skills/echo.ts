@@ -8,6 +8,8 @@ import type { Skill } from "./types";
 export const echoSkill: Skill = {
   type: "echo",
 
+  schemaDescription: '{"reply": "<kurze Antwort als String, nicht leer>"}',
+
   buildPrompt(ctx) {
     const { input } = echoContextSchema.parse(ctx);
     return [

@@ -1,6 +1,7 @@
 import { RUNNER_HEARTBEAT_INTERVAL_MS, type AgentJob } from "@leitwerk/shared";
 import type { BrokerClient } from "./broker";
 import type { AiProvider } from "./providers";
+import { buildRepairPrompt } from "./repair";
 import { getSkill } from "./skills";
 import { log } from "./util/log";
 
@@ -40,20 +41,15 @@ export async function executeJob(
       try {
         skillResult = skill.parse(raw, context);
       } catch (parseError) {
-        // Reparatur-Retry (1×): ungültiges JSON zurückspiegeln
+        // Reparatur-Retry (1×): schlank — nur Schema + fehlerhafte Antwort,
+        // nicht der komplette Original-Prompt (Etappe 0.5)
         log.warn(
           `Job ${job.id}: Antwort ungültig (${String(parseError)}), starte Reparatur-Versuch`,
         );
-        const repairPrompt = [
-          prompt,
-          "",
-          "Deine vorherige Antwort war KEIN gültiges JSON im geforderten Format:",
-          "---",
-          raw.slice(0, 2000),
-          "---",
-          "Antworte jetzt AUSSCHLIESSLICH mit gültigem JSON im geforderten Format.",
-        ].join("\n");
-        const repaired = await provider.complete(repairPrompt, opts);
+        const repaired = await provider.complete(
+          buildRepairPrompt(skill.schemaDescription, raw),
+          opts,
+        );
         skillResult = skill.parse(repaired, context);
       }
     }
