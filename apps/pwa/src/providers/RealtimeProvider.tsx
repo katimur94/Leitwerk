@@ -50,6 +50,40 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         () =>
           void queryClient.invalidateQueries({ queryKey: ["notifications"] }),
       )
+      // Mail-Hub (Etappe 1): Threads/Nachrichten/Entwürfe live halten
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "mail_threads",
+          filter: `org_id=eq.${orgId}`,
+        },
+        () => {
+          void queryClient.invalidateQueries({ queryKey: ["mail_threads", orgId] });
+          void queryClient.invalidateQueries({ queryKey: ["mail_thread"] });
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "mail_messages",
+          filter: `org_id=eq.${orgId}`,
+        },
+        () => void queryClient.invalidateQueries({ queryKey: ["mail_messages"] }),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "mail_drafts",
+          filter: `org_id=eq.${orgId}`,
+        },
+        () => void queryClient.invalidateQueries({ queryKey: ["mail_drafts"] }),
+      )
       .subscribe();
 
     return () => {

@@ -5,6 +5,7 @@ import {
   Inbox,
   ListChecks,
   LogOut,
+  Mail,
   Moon,
   Receipt,
   Settings,
@@ -133,6 +134,19 @@ export function AppShell() {
                   }
                 >
                   <Cpu size={15} /> {t("runner.title")}
+                </NavLink>
+                <NavLink
+                  to="/einstellungen/postfaecher"
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-[var(--lw-radius-sm)] px-2 py-1.5 text-[13px]",
+                      isActive
+                        ? "bg-lw-surface font-medium text-lw-ink"
+                        : "text-lw-ink-soft hover:bg-lw-surface",
+                    )
+                  }
+                >
+                  <Mail size={15} /> {t("mail.title")}
                 </NavLink>
                 <NavLink
                   to="/einstellungen/regeln"

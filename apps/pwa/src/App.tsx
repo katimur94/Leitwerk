@@ -1,8 +1,12 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { RequireAuth, RequireOrg } from "./routes/guards";
 import { AppShell } from "./routes/AppShell";
+import { CaseDetail } from "./routes/CaseDetail";
+import { CasesList } from "./routes/CasesList";
 import { ComingSoon } from "./routes/ComingSoon";
+import { Inbox } from "./routes/Inbox";
 import { Login } from "./routes/Login";
+import { MailSettings } from "./routes/MailSettings";
 import { Onboarding } from "./routes/Onboarding";
 import { Register } from "./routes/Register";
 import { RulesSettings } from "./routes/RulesSettings";
@@ -33,14 +37,9 @@ export function App() {
         }
       >
         <Route index element={<Today />} />
-        <Route
-          path="posteingang"
-          element={<ComingSoon titleKey="nav.inbox" phase={1} />}
-        />
-        <Route
-          path="vorgaenge"
-          element={<ComingSoon titleKey="nav.cases" phase={1} />}
-        />
+        <Route path="posteingang" element={<Inbox />} />
+        <Route path="vorgaenge" element={<CasesList />} />
+        <Route path="vorgaenge/:caseId" element={<CaseDetail />} />
         <Route
           path="aufgaben"
           element={<ComingSoon titleKey="nav.tasks" phase={2} />}
@@ -55,6 +54,7 @@ export function App() {
         />
         <Route path="einstellungen/runner" element={<RunnerSettings />} />
         <Route path="einstellungen/regeln" element={<RulesSettings />} />
+        <Route path="einstellungen/postfaecher" element={<MailSettings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
