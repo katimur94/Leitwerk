@@ -7,3 +7,4 @@ export * from "./rules";
 export * from "./mail";
 export * from "./watchdog";
 export * from "./finance";
+export * from "./knowledge";

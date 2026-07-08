@@ -228,13 +228,15 @@ Deno.serve(async (req) => {
       case "attachment":
         return await handleAttachment(db, runner, req);
       case "download": {
-        // Blob aus dem Storage (nur Pfade der eigenen Org)
+        // Blob aus dem Storage (nur Pfade der eigenen Org).
+        // Etappe 4: zusätzlich Bucket 'audio' (Meetings/Sprachnotizen → Whisper).
         const body = await req.json().catch(() => ({}));
         const path = String(body.storagePath ?? "");
+        const bucket = body.bucket === "audio" ? "audio" : "attachments";
         if (!path.startsWith(`org/${runner.org_id}/`)) {
           return json({ error: "Pfad gehört nicht zu dieser Organisation" }, 403);
         }
-        const { data, error } = await db.storage.from("attachments").download(path);
+        const { data, error } = await db.storage.from(bucket).download(path);
         if (error || !data) return json({ error: `Download: ${error?.message}` }, 404);
         const bytes = new Uint8Array(await data.arrayBuffer());
         let bin = "";

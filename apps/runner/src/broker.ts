@@ -133,9 +133,9 @@ export class BrokerClient {
     return { messages: data.messages ?? 0, attachments: data.attachments ?? 0 };
   }
 
-  /** Anhangs-Blob aus dem Storage laden (z. B. für extract_invoice). */
-  async mailDownload(storagePath: string): Promise<Uint8Array> {
-    const data = (await this.post("mail-sync", "/download", { storagePath })) as {
+  /** Blob aus dem Storage laden (Buckets 'attachments' oder 'audio'). */
+  async mailDownload(storagePath: string, bucket = "attachments"): Promise<Uint8Array> {
+    const data = (await this.post("mail-sync", "/download", { storagePath, bucket })) as {
       data?: string;
     };
     if (!data.data) throw new Error("mail-sync /download lieferte keine Daten");
