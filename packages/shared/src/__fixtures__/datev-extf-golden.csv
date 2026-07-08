@@ -1,0 +1,5 @@
+"EXTF";700;21;"Buchungsstapel";9;20260708120000000;;"";"Leitwerk";"";12345;6789;20260101;4;20260701;20260731;"Buchungsstapel Juli 2026";"";1;0;0;"EUR";;;;;"";"SKR03";;
+"Umsatz (ohne Soll/Haben-Kz)";"Soll/Haben-Kennzeichen";"WKZ Umsatz";"Kurs";"Basis-Umsatz";"WKZ Basis-Umsatz";"Konto";"Gegenkonto (ohne BU-Schlüssel)";"BU-Schlüssel";"Belegdatum";"Belegfeld 1";"Belegfeld 2";"Skonto";"Buchungstext"
+2961,28;"S";;;;;10001;8400;;0507;"RE-2026-0007";"";;"Rechnung RE-2026-0007 Muster GmbH"
+535,50;"S";;;;;10002;8400;;0607;"RE-2026-0008";"";;"Rechnung RE-2026-0008"
+486,90;"H";;;;;70001;4980;9;0707;"RE-88123";"";;"Eingangsrechnung OfficeSupply GmbH"
