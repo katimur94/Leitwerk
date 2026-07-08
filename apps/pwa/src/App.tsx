@@ -5,6 +5,7 @@ import { ComingSoon } from "./routes/ComingSoon";
 import { Login } from "./routes/Login";
 import { Onboarding } from "./routes/Onboarding";
 import { Register } from "./routes/Register";
+import { RulesSettings } from "./routes/RulesSettings";
 import { RunnerSettings } from "./routes/RunnerSettings";
 import { Today } from "./routes/Today";
 
@@ -53,6 +54,7 @@ export function App() {
           element={<Navigate to="/einstellungen/runner" replace />}
         />
         <Route path="einstellungen/runner" element={<RunnerSettings />} />
+        <Route path="einstellungen/regeln" element={<RulesSettings />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

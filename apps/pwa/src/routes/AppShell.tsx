@@ -3,6 +3,7 @@ import {
   Cpu,
   FolderOpen,
   Inbox,
+  ListChecks,
   LogOut,
   Moon,
   Receipt,
@@ -132,6 +133,19 @@ export function AppShell() {
                   }
                 >
                   <Cpu size={15} /> {t("runner.title")}
+                </NavLink>
+                <NavLink
+                  to="/einstellungen/regeln"
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-[var(--lw-radius-sm)] px-2 py-1.5 text-[13px]",
+                      isActive
+                        ? "bg-lw-surface font-medium text-lw-ink"
+                        : "text-lw-ink-soft hover:bg-lw-surface",
+                    )
+                  }
+                >
+                  <ListChecks size={15} /> {t("rules.title")}
                 </NavLink>
               </>
             ) : (

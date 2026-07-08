@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   JOB_PRIORITY,
   type AgentJobRow,
+  type QuietHours,
   type RunnerRow,
 } from "@leitwerk/shared";
 import { supabase } from "../../lib/supabase";
@@ -11,6 +12,11 @@ import { useSessionStore } from "../../stores/session";
 export function isRunnerOnline(runner: RunnerRow): boolean {
   if (runner.status !== "online" || !runner.last_heartbeat) return false;
   return Date.now() - Date.parse(runner.last_heartbeat) < 3 * 60_000;
+}
+
+/** Zwei-Stufen-Pairing (Migration 017): wartet auf Bestätigung in der PWA. */
+export function isPendingApproval(runner: RunnerRow): boolean {
+  return runner.status === "pending_approval";
 }
 
 export function useRunners() {
@@ -69,6 +75,66 @@ export function useCreatePairingCode() {
       if (error) throw new Error(error.message);
       return code;
     },
+  });
+}
+
+/** Runner freigeben (RPC approve_runner, nur Owner/Admin — Migration 017). */
+export function useApproveRunner() {
+  const orgId = useSessionStore((s) => s.activeOrg?.id);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (runnerId: string) => {
+      const { error } = await supabase.rpc("approve_runner", {
+        p_runner_id: runnerId,
+      });
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["runners", orgId] }),
+  });
+}
+
+/** Runner ablehnen/deaktivieren (RPC reject_runner — Token wird unbrauchbar). */
+export function useRejectRunner() {
+  const orgId = useSessionStore((s) => s.activeOrg?.id);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (runnerId: string) => {
+      const { error } = await supabase.rpc("reject_runner", {
+        p_runner_id: runnerId,
+      });
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["runners", orgId] }),
+  });
+}
+
+export interface RunnerLimitsUpdate {
+  runnerId: string;
+  max_jobs_per_hour: number;
+  daily_job_limit: number;
+  quiet_hours: QuietHours | null;
+}
+
+/**
+ * Abo-Schutz-Einstellungen (Migration 017): Der Client darf auf runners
+ * nur name/max_jobs_per_hour/daily_job_limit/quiet_hours ändern
+ * (Spalten-Grants); Status/Token laufen über Broker bzw. RPCs.
+ */
+export function useUpdateRunnerLimits() {
+  const orgId = useSessionStore((s) => s.activeOrg?.id);
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ runnerId, ...fields }: RunnerLimitsUpdate) => {
+      const { error } = await supabase
+        .from("runners")
+        .update(fields)
+        .eq("id", runnerId);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: ["runners", orgId] }),
   });
 }
 
