@@ -9,6 +9,9 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: "autoUpdate",
+      // Web-Push (Etappe 2): push-/notificationclick-Handler liegen in
+      // public/push-sw.js und werden in den generierten Service Worker geladen.
+      workbox: { importScripts: ["push-sw.js"] },
       manifest: {
         name: "Leitwerk",
         short_name: "Leitwerk",

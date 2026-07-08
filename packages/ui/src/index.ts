@@ -7,3 +7,4 @@ export { EmptyState, type EmptyStateProps } from "./components/EmptyState";
 export { Skeleton, SkeletonRows } from "./components/Skeleton";
 export { StatusDot, type StatusKind } from "./components/StatusDot";
 export { CaseTimeline, type TimelineItem } from "./components/CaseTimeline";
+export { TrustMeter, type TrustMeterProps } from "./components/TrustMeter";

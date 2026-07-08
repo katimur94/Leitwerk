@@ -2,6 +2,7 @@ import {
   CheckSquare,
   Cpu,
   FolderOpen,
+  Gauge,
   Inbox,
   ListChecks,
   LogOut,
@@ -15,6 +16,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { cn } from "@leitwerk/ui";
 import { CommandBar } from "../components/CommandBar";
 import { OfflineBanner } from "../components/OfflineBanner";
+import { NotificationCenter } from "../features/notifications/NotificationCenter";
 import { t } from "../i18n/de";
 import { supabase } from "../lib/supabase";
 import { toggleTheme } from "../lib/theme";
@@ -83,6 +85,7 @@ export function AppShell() {
             />
           ))}
           <div className="mt-auto flex flex-col items-center gap-1">
+            <NotificationCenter />
             <RailLink
               to="/einstellungen/runner"
               end={false}
@@ -160,6 +163,19 @@ export function AppShell() {
                   }
                 >
                   <ListChecks size={15} /> {t("rules.title")}
+                </NavLink>
+                <NavLink
+                  to="/einstellungen/automationen"
+                  className={({ isActive }) =>
+                    cn(
+                      "flex items-center gap-2 rounded-[var(--lw-radius-sm)] px-2 py-1.5 text-[13px]",
+                      isActive
+                        ? "bg-lw-surface font-medium text-lw-ink"
+                        : "text-lw-ink-soft hover:bg-lw-surface",
+                    )
+                  }
+                >
+                  <Gauge size={15} /> {t("automations.title")}
                 </NavLink>
               </>
             ) : (
