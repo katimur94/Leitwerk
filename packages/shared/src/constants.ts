@@ -25,7 +25,37 @@ export const AUTONOMY_LEVELS = {
 export const PAIRING_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export const PAIRING_CODE_LENGTH = 8;
 
+/** Rate-Limit auf /pair: max. Versuche pro IP pro Minute (Migration 017). */
+export const MAX_PAIRING_ATTEMPTS_PER_MINUTE = 10;
+/** Nach so vielen Fehlversuchen ist ein Pairing-Code dauerhaft ungültig. */
+export const MAX_PAIRING_CODE_FAILURES = 5;
+/**
+ * Poll-Intervall beim Pairing (ms) — bewusst > 6 s, damit ein einzelner
+ * Runner das IP-Rate-Limit von 10/Minute nie selbst auslöst.
+ */
+export const RUNNER_PAIR_POLL_INTERVAL_MS = 7_000;
+
 /** Poll-Intervall des Runners, wenn die Queue leer ist (ms). */
 export const RUNNER_POLL_INTERVAL_MS = 5_000;
 /** Heartbeat-Intervall während ein Job läuft (ms). */
 export const RUNNER_HEARTBEAT_INTERVAL_MS = 30_000;
+/** Wartezeit zwischen Claim-Versuchen, solange der Runner auf Freigabe wartet (ms). */
+export const RUNNER_PENDING_APPROVAL_POLL_MS = 10_000;
+
+/**
+ * Ereignisse der Regel-Engine (org_rules.trigger_event).
+ * P1–P6 schleusen jedes dieser Ereignisse durch evaluate_org_rules.
+ */
+export const ORG_RULE_EVENTS = [
+  "mail_received",
+  "mail_sent",
+  "case_created",
+  "task_created",
+  "invoice_captured",
+  "invoice_paid",
+  "quote_sent",
+  "quote_accepted",
+  "payment_matched",
+  "finding_created",
+] as const;
+export type OrgRuleEvent = (typeof ORG_RULE_EVENTS)[number];

@@ -8,7 +8,21 @@
 
 export type OrgRole = "owner" | "admin" | "member" | "viewer";
 export type AiProviderKind = "claude_cli" | "codex_cli" | "anthropic_api";
-export type RunnerStatus = "online" | "offline" | "disabled";
+export type RunnerStatus =
+  | "pending_approval"
+  | "online"
+  | "offline"
+  | "disabled";
+
+/** Nachtfenster für Batch-Jobs (runners.quiet_hours, Migration 017). */
+export interface QuietHours {
+  /** "HH:MM" */
+  start: string;
+  /** "HH:MM" — darf vor start liegen (Fenster über Mitternacht) */
+  end: string;
+  /** IANA-Zeitzone; Default = Org-Zeitzone */
+  timezone?: string;
+}
 
 export interface OrgRow {
   id: string;
@@ -79,6 +93,9 @@ export interface RunnerRow {
   version: string | null;
   max_jobs_per_hour: number;
   daily_job_limit: number;
+  quiet_hours: QuietHours | null;
+  approved_by: string | null;
+  approved_at: string | null;
   created_at: string;
 }
 
@@ -90,6 +107,7 @@ export interface RunnerPairingCodeRow {
   expires_at: string;
   claimed_at: string | null;
   runner_id: string | null;
+  failed_attempts: number;
 }
 
 export interface AgentJobRow {

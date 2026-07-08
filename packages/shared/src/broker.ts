@@ -4,6 +4,7 @@ import { agentJobSchema } from "./jobs";
 /** Endpunkte der Edge Function runner-broker. */
 export const BROKER_ACTIONS = [
   "pair",
+  "status",
   "claim",
   "heartbeat",
   "complete",
@@ -26,9 +27,17 @@ export const pairResponseSchema = z.discriminatedUnion("status", [
     runnerId: z.string().uuid(),
     runnerToken: z.string().min(20),
     orgId: z.string().uuid(),
+    /** Zwei-Stufen-Pairing (Migration 017): true = wartet auf Freigabe in der PWA */
+    pendingApproval: z.boolean().optional(),
   }),
 ]);
 export type PairResponse = z.infer<typeof pairResponseSchema>;
+
+/** Antwort von /status — Selbstauskunft des Runners (auch vor Freigabe). */
+export const runnerStatusResponseSchema = z.object({
+  status: z.enum(["pending_approval", "online", "offline", "disabled"]),
+});
+export type RunnerStatusResponse = z.infer<typeof runnerStatusResponseSchema>;
 
 export const claimResponseSchema = z.object({
   job: agentJobSchema.nullable(),
@@ -42,4 +51,8 @@ export const contextResponseSchema = z.object({
 });
 export type ContextResponse = z.infer<typeof contextResponseSchema>;
 
-export const brokerErrorSchema = z.object({ error: z.string() });
+export const brokerErrorSchema = z.object({
+  error: z.string(),
+  /** Maschinenlesbarer Fehlercode, z. B. 'pending_approval', 'rate_limited' */
+  code: z.string().optional(),
+});
