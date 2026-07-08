@@ -22,29 +22,43 @@ npm install -g leitwerk-runner
 leitwerk-runner init
 ```
 Der Runner zeigt einen 8-stelligen **Pairing-Code**.
-In der Leitwerk-App: **Einstellungen → Runner → Runner koppeln** → Code eingeben.
-Der Runner bestätigt: `✓ Gekoppelt mit <Workspace> als <Nutzer>`.
+In der Leitwerk-App: **Einstellungen → Runner → Runner verbinden** → Code eingeben.
+
+**Wichtig (Zwei-Stufen-Pairing):** Nach dem Einlösen des Codes wartet der Runner auf
+deine **Freigabe**. Die App zeigt unter Einstellungen → Runner den neuen Runner mit
+Rechnername, Provider und Zeitpunkt — erst **„Bestätigen“** schaltet ihn frei
+(„Ablehnen“ sperrt ihn dauerhaft). Der Runner meldet im Terminal
+`Runner freigegeben ✓`, sobald du bestätigt hast.
+
+Sicherheitsnetz im Hintergrund: max. 10 Pairing-Versuche pro Minute und IP;
+nach 5 Fehlversuchen ist ein Code dauerhaft ungültig (Pairing dann neu starten).
 
 ## 3. Als Dienst starten (dauerhaft)
-**Windows:** `leitwerk-runner service install` (legt einen Autostart-Task an,
-Tray-Icon zeigt Status). 
-**Linux/VPS:**
+Ein Befehl auf allen Plattformen — vorher einmal gepairt haben (Schritt 2):
 ```bash
-leitwerk-runner service install   # erzeugt systemd-Unit leitwerk-runner.service
-systemctl --user enable --now leitwerk-runner
+leitwerk-runner service install     # richtet Autostart ein und startet sofort
+leitwerk-runner service status      # Dienststatus prüfen
+leitwerk-runner service uninstall   # Dienst wieder entfernen
 ```
-**macOS:** `leitwerk-runner service install` (launchd-Agent).
+- **Windows:** geplanter Task `LeitwerkRunner` (schtasks, Start bei Anmeldung).
+- **Linux/VPS:** systemd-User-Unit `leitwerk-runner.service`
+  (`systemctl --user status leitwerk-runner`). Auf Servern ohne Login-Session
+  zusätzlich einmalig: `loginctl enable-linger $USER`.
+- **macOS:** launchd-Agent `com.leitwerk.runner`
+  (Log: `~/.leitwerk-runner/runner.log`).
 
 ## 4. Limits einstellen (Max-Abo schonen)
-In der App unter **Einstellungen → Runner**:
+In der App unter **Einstellungen → Runner → Limits** (pro Runner):
 - Max. KI-Jobs pro Stunde (Standard 60) und pro Tag (Standard 500)
-- Nachtfenster für Batch-Jobs (Standard 02:00–06:00)
-- Priorität: interaktive Anfragen laufen immer sofort, Batch wartet
+- Optionales Nachtfenster für Batch-Jobs (z. B. 22:00–06:00)
+- Interaktive Anfragen (Priorität ≤ 2) laufen immer sofort; normale Jobs nur
+  außerhalb, Nacht-Batch (z. B. Wächter-Lauf) nur innerhalb des Fensters
 
-Die App zeigt live: Runner online/offline, Jobs heute, Fehlerquote, letzte Aktivität.
+Die Limits werden **serverseitig** beim Job-Claim erzwungen — nicht nur in der UI.
+Die App zeigt live: Runner online/offline, letzte Aktivität, Limits.
 
 ## 5. Alternativen zum Claude-Max-Abo
-Beim `init` wählbar (oder später via `leitwerk-runner config`):
+Beim `init` automatisch erkannt (Wechsel: `leitwerk-runner init` erneut ausführen):
 - `claude_cli` — Standard, nutzt das eigene Claude-Abo (empfohlen)
 - `codex_cli` — OpenAI Codex CLI mit eigenem OpenAI-Login
 - `anthropic_api` — eigener API-Key (pay-per-token), für Server ohne Browser-Login
@@ -52,10 +66,12 @@ Beim `init` wählbar (oder später via `leitwerk-runner config`):
 ## Fehlerbehebung
 | Problem | Lösung |
 |---|---|
-| App zeigt "Runner offline" | Dienststatus prüfen: `leitwerk-runner status`; Rechner an? Internet? |
+| App zeigt "Runner offline" | Dienststatus prüfen: `leitwerk-runner service status`; Rechner an? Internet? |
+| Runner meldet "wartet auf Freigabe" | App → Einstellungen → Runner → „Bestätigen“ klicken (Owner/Admin) |
+| "Pairing-Code gesperrt" | Zu viele Fehlversuche — `leitwerk-runner init` neu starten (neuer Code) |
 | Jobs schlagen fehl mit "not logged in" | `claude login` erneut ausführen (Session abgelaufen) |
 | "Rate limit" Meldungen | Stundenlimit senken; Max-Abo-Nutzung durch andere Tools prüfen |
-| Runner neu koppeln | App → Einstellungen → Runner → Entkoppeln, dann `leitwerk-runner init` |
+| Runner neu koppeln | App → Einstellungen → Runner → Ablehnen/Deaktivieren, dann `leitwerk-runner init` |
 
 ## Sicherheit (für den Nutzer transparent machen)
 - Der Runner spricht ausschließlich mit dem Leitwerk-Server und den vom Nutzer selbst

@@ -1,5 +1,73 @@
 # Changelog
 
+## Etappe 0.5 — Security- & Robustheits-Fixes (2026-07-08)
+
+Härtung VOR dem Feature-Ausbau (Migration `017_security_hardening.sql`):
+
+- **Pairing gehärtet:**
+  - Rate-Limit auf `/pair`: Tabelle `pairing_attempts` (IP-Hash, Minutenfenster),
+    max. 10 Versuche pro IP/Minute → HTTP 429 mit `Retry-After`. IPs landen nur
+    gehasht (SHA-256 mit Pepper) in der DB. Der Runner pollt deshalb alle 7 s
+    (statt 3 s) und behandelt 429 mit Backoff.
+  - Fehlversuche pro Code: `runner_pairing_codes.failed_attempts` — ein Einlöse-Versuch
+    auf einen existierenden, aber abgelaufenen/verbrauchten Code zählt hoch; ab 5
+    ist der Code dauerhaft gesperrt (HTTP 410). Unbekannte Codes bleiben der normale
+    Poll-Zustand (kein Fehlversuch), Brute-Force fängt das IP-Limit ab.
+  - **Zwei-Stufen-Pairing:** Runner werden mit `status='pending_approval'` angelegt
+    und dürfen NICHTS claimen (`claim_next_job`, Broker-Auth und `build-job-context`
+    lehnen ab). Die PWA (Einstellungen → Runner) zeigt Hostname, Provider und
+    Zeitpunkt mit „Bestätigen“/„Ablehnen“ — RPCs `approve_runner`/`reject_runner`
+    (nur Owner/Admin, mit Audit-Log). Neuer Broker-Endpunkt `/status`, damit der
+    Runner auf seine Freigabe warten kann (`init` und `start` zeigen den Zustand an).
+- **Abo-Schutz serverseitig:** `claim_next_job` prüft `max_jobs_per_hour` und
+  `daily_job_limit` (Zählung über `agent_job_events` `'claimed'`, neue indexierte
+  Spalte `runner_id`, rollierende Fenster 60 min/24 h) und respektiert das neue Feld
+  `runners.quiet_hours` (jsonb `{start,end,timezone?}`): interaktive Jobs
+  (priority ≤ 2) laufen immer, normale Jobs (3–7) nur außerhalb, Batch-Jobs
+  (priority ≥ 8) NUR im Nachtfenster, wenn eines konfiguriert ist. UI dafür unter
+  Einstellungen → Runner → Limits.
+- **Grants nachgezogen:** Runner-RPCs (`claim_next_job` & Co.) sind für
+  `anon`/`authenticated` nicht mehr aufrufbar (nur Service Role/Broker); auf `runners`
+  darf der Client nur noch `name`, `max_jobs_per_hour`, `daily_job_limit`,
+  `quiet_hours` ändern (Spalten-Grants) — Status/Token laufen ausschließlich über
+  Broker bzw. Freigabe-RPCs.
+- **Reparatur-Retry verschlankt:** Beim JSON-Reparatur-Versuch geht nur noch die
+  Schema-Beschreibung des Skills (`Skill.schemaDescription`, neues Pflichtfeld) +
+  die fehlerhafte Antwort (max. 2000 Zeichen) an die KI — nicht mehr der komplette
+  Original-Prompt (`apps/runner/src/repair.ts`, mit Tests).
+- **Ein Roundtrip beim Claim:** Das `runners`-Update (Heartbeat/online) ist in die
+  RPC `claim_next_job` gewandert; der Broker macht kein separates Update mehr.
+- **`leitwerk-runner service install|uninstall|status`:** Autostart-Dienst für
+  Linux (systemd user unit), macOS (launchd-Agent) und Windows (schtasks ONLOGON);
+  Tutorial 05 entsprechend verifiziert/aktualisiert.
+- **Regel-Engine light:** Tabelle `org_rules` (org-scoped, RLS: Mitglieder lesen,
+  Owner/Admin schreiben) + Postgres-Funktionen `rule_condition_matches` und
+  `evaluate_org_rules(org, event, entity)` — wertet aktive Regeln aus und erzeugt
+  Jobs, Benachrichtigungen oder Aufgaben (Audit-Eintrag `rule.executed`).
+  UI: einfacher Regel-Builder („Wenn 〈Ereignis〉 und 〈Bedingungen〉 dann 〈Aktion〉“)
+  unter Einstellungen → Regeln. JS-Spiegel der Bedingungslogik in
+  `packages/shared/src/rules.ts` (mit Tests) für Vorschau + Mock-Server.
+  P1–P6 schleusen ihre Ereignisse (`mail_received`, `invoice_captured`, `quote_sent`,
+  `payment_matched`, …) durch die Engine.
+- **Mock-Server + E2E nachgezogen:** Zwei-Stufen-Pairing, Rate-Limit, Limits,
+  quiet_hours, `org_rules` und die RPCs im Mock; E2E-Lauf erweitert (jetzt 20
+  annotierte Screenshots inkl. Freigabe, Limits, Regel-Builder) und komplett grün
+  durchlaufen; `claude-mock.cjs` jetzt direkt ausführbar (Exec-Bit).
+
+### Manuelle Schritte für den Betreiber (Deploy Etappe 0.5)
+
+1. **Migration einspielen:** `supabase db push` (neu: `017_security_hardening.sql`).
+   ⚠️ Bestehende Runner behalten ihren Status; nur NEUE Pairings landen in
+   `pending_approval`.
+2. **Edge Function neu deployen:** `supabase functions deploy runner-broker`
+   (neuer `/status`-Endpunkt, Rate-Limit, Zwei-Stufen-Pairing).
+   `build-job-context` unverändert — kein Redeploy nötig.
+3. **PWA neu bauen/deployen:** `pnpm --filter @leitwerk/pwa build`
+   (Freigabe-UI, Limits-UI, Einstellungen → Regeln).
+4. **Runner aktualisieren** (alle Nutzer): `npm update -g leitwerk-runner`, danach
+   optional `leitwerk-runner service install` für den Autostart-Dienst.
+5. Keine neuen Secrets, keine neuen Cron-Jobs, keine Buckets in dieser Etappe.
+
 ## Lokale Test-Umgebung + Screenshot-Tutorial (2026-07-08)
 
 - **`tools/mock-server/`** — lokales Mock-Backend (Port 54321), das das in P0 genutzte

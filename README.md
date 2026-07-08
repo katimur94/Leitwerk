@@ -8,7 +8,7 @@ Claude-Max-Abo mit (**BYO-KI**: kein zentraler API-Schlüssel, keine KI-Kosten b
 > Oberfläche — verbunden durch einen KI-Kern, der sich sein Vertrauen messbar verdient
 > (Autonomie-Regler Stufe 1–4 mit sichtbarer Trefferquote).
 
-![App-Shell](docs/testing-tutorial/img/10-app-shell-heute.png)
+![App-Shell](docs/testing-tutorial/img/11-app-shell-heute.png)
 
 ---
 
@@ -77,7 +77,7 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
 [lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 16 Bildern:
+mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 20 Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
 ### Anmelden & Registrieren
@@ -100,21 +100,28 @@ automatisch per Datenbank-Trigger.
 Die Stammdaten fließen später in Angebote, Rechnungen (ZUGFeRD/XRechnung, Phase 3)
 und Signaturen. Nummernkreise mit Vorschau der nächsten Nummer:
 
-![Nummernkreise](docs/testing-tutorial/img/08-onboarding-nummernkreise.png)
+![Nummernkreise](docs/testing-tutorial/img/09-onboarding-nummernkreise.png)
 
 ### Runner-Pairing — das Herzstück des BYO-KI-Modells
 
 Der Nutzer startet den Runner auf seinem Rechner (`npx leitwerk-runner init`), der
 Runner zeigt einen 8-stelligen Code, der Nutzer tippt ihn in die PWA. Beim nächsten
 Poll löst der Runner den Code ein und erhält sein Token — der Klartext existiert genau
-einmal in dieser Antwort, in der Datenbank liegt nur der Hash.
+einmal in dieser Antwort, in der Datenbank liegt nur der Hash. Das Pairing ist gehärtet:
+Rate-Limit pro IP (10/Minute), Fehlversuchszähler pro Code (5 → Code gesperrt).
 
 ![Runner-Pairing](docs/testing-tutorial/img/06-onboarding-runner-pairing.png)
 
-Danach erscheint der Runner mit Live-Status (grün = Heartbeat < 3 Minuten, dieselbe
-Schwelle nutzt der serverseitige Watchdog):
+**Zwei-Stufen-Pairing:** Der frisch gepairte Runner startet als `pending_approval` und
+darf nichts claimen, bis ein Owner/Admin ihn in der PWA bestätigt — ein erratener
+Pairing-Code allein reicht damit nicht mehr für Datenzugriff:
 
-![Runner verbunden](docs/testing-tutorial/img/07-onboarding-runner-verbunden.png)
+![Runner-Freigabe](docs/testing-tutorial/img/07-onboarding-runner-freigabe.png)
+
+Nach der Freigabe erscheint der Runner mit Live-Status (grün = Heartbeat < 3 Minuten,
+dieselbe Schwelle nutzt der serverseitige Watchdog):
+
+![Runner verbunden](docs/testing-tutorial/img/08-onboarding-runner-verbunden.png)
 
 ### Runner-Einstellungen & Test-Job
 
@@ -123,20 +130,35 @@ Provider-Badge, Pairing weiterer Runner, und der Test-Job, der die komplette Ket
 prüft. Ist kein Runner online, zeigt ein dezentes Banner das an — der Rest der App
 bleibt voll benutzbar.
 
-![Runner-Einstellungen](docs/testing-tutorial/img/13-runner-einstellungen.png)
+![Runner-Einstellungen](docs/testing-tutorial/img/14-runner-einstellungen.png)
+
+**Abo-Schutz pro Runner:** Stunden- und Tageslimit plus optionales Nachtfenster für
+Batch-Jobs — serverseitig erzwungen in `claim_next_job` (nicht nur UI). Interaktive
+Jobs laufen immer, Nacht-Batch (z. B. Wächter-Lauf) nur im konfigurierten Fenster:
+
+![Runner-Limits](docs/testing-tutorial/img/15-runner-limits.png)
 
 Der Test-Job legt einen `echo`-Job in die Queue (Priorität 2 = interaktiv). Der Runner
 claimt ihn per `claim_next_job` (prioritätssortiert, SKIP LOCKED), holt sich den
 serverseitig zugeschnittenen Kontext, ruft die KI und liefert das strikt Zod-geparste
 Ergebnis mit Idempotenz-Hash ab:
 
-![Test-Job gesendet](docs/testing-tutorial/img/14-testjob-gesendet.png)
+![Test-Job gesendet](docs/testing-tutorial/img/16-testjob-gesendet.png)
 
 Der Status läuft live durch (Wartet → Läuft → Erledigt), die Antwort trägt das violette
 **KI-Badge** — die eiserne Design-Regel: Violett markiert überall in Leitwerk
 ausschließlich, was von der Maschine kommt.
 
-![KI-Antwort](docs/testing-tutorial/img/15-testjob-ki-antwort.png)
+![KI-Antwort](docs/testing-tutorial/img/17-testjob-ki-antwort.png)
+
+### Regel-Engine light (Einstellungen → Regeln)
+
+Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *Aktion*
+(Benachrichtigung, Aufgabe, KI-Job)“. Die Auswertung läuft serverseitig
+(`evaluate_org_rules`); ab Phase 1 schleusen alle Module ihre Ereignisse
+(`mail_received`, `invoice_captured`, `quote_sent`, `payment_matched`, …) hindurch:
+
+![Regeln](docs/testing-tutorial/img/19-regel-liste.png)
 
 ### App-Shell, CommandBar & Dark Mode
 
@@ -144,12 +166,12 @@ Icon-Rail (56 px) → Kontext-Sidebar → Hauptfläche, alle Module navigierbar 
 Phasen-Platzhaltern (kein Feature ohne Empty-State). CommandBar per Strg/Cmd+K — wird in
 Phase 4 zur globalen Suche (Volltext + semantisch via pgvector):
 
-![CommandBar](docs/testing-tutorial/img/12-commandbar.png)
+![CommandBar](docs/testing-tutorial/img/13-commandbar.png)
 
 Vollwertiges dunkles Theme mit einem Klick, alle Design-Tokens aus
 [docs/DESIGN.md](docs/DESIGN.md):
 
-![Dark Mode](docs/testing-tutorial/img/16-dark-mode.png)
+![Dark Mode](docs/testing-tutorial/img/20-dark-mode.png)
 
 ---
 
