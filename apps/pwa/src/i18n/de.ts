@@ -428,6 +428,7 @@ export const de: Record<string, string> = {
   "export.button": "Export erzeugen",
   "export.running": "Wird erzeugt …",
   "export.done": "Export bereit ✓",
+  "today.weeklyBadge": "Wochenreport",
 };
 
 export function t(key: string): string {

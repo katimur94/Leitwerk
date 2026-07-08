@@ -29,6 +29,27 @@ function useLatestBriefing() {
   });
 }
 
+function useLatestWeekly() {
+  const orgId = useSessionStore((s) => s.activeOrg?.id);
+  return useQuery({
+    queryKey: ["briefing_weekly", orgId],
+    enabled: !!orgId,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("briefings")
+        .select("*")
+        .eq("org_id", orgId!)
+        .eq("kind", "weekly")
+        .order("for_date", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      return (data as BriefingRow | null) ?? null;
+    },
+  });
+}
+
 function useOpenFindings() {
   const orgId = useSessionStore((s) => s.activeOrg?.id);
   return useQuery({
@@ -124,6 +145,7 @@ function FindingRow({ finding }: { finding: AgentFindingRow }) {
 export function Today() {
   const navigate = useNavigate();
   const briefing = useLatestBriefing();
+  const weekly = useLatestWeekly();
   const findings = useOpenFindings();
   const followups = useOverdueFollowups();
 
@@ -215,6 +237,19 @@ export function Today() {
           <p className="text-[13px] text-lw-ink-soft">{t("today.noBriefingYet")}</p>
         </Card>
       )}
+
+      {/* Wochenreport (Etappe 5): freitags erzeugt, hier verlinkt */}
+      {weekly.data ? (
+        <Card className="p-5">
+          <div className="flex items-center gap-2">
+            <AiBadge label={t("today.weeklyBadge")} />
+            <span className="text-[12px] text-lw-ink-faint">
+              {formatDateTime(weekly.data.created_at)}
+            </span>
+          </div>
+          <p className="mt-3 text-[14px] leading-relaxed text-lw-ink">{weekly.data.content_md}</p>
+        </Card>
+      ) : null}
 
       {/* Wächter-Findings */}
       <Card className="p-5">

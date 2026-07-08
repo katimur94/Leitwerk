@@ -72,6 +72,10 @@ const emptyDb = () => ({
   meeting_segments: [],
   embeddings: [],
   ai_style_profiles: [],
+  // Etappe 5: Team & Ausbau
+  thread_comments: [],
+  calendar_accounts: [],
+  calendar_events: [],
 });
 
 // Rate-Limit auf /pair (Migration 017) — Fenster pro Minute, im Speicher.
@@ -308,6 +312,15 @@ const tableDefaults = {
     transcript: null, transcript_done_at: null, protocol_md: null,
     decisions: [], open_questions: [], participants: [],
     job_id: null, created_by: null, created_at: now(), updated_at: now(),
+  }),
+  thread_comments: () => ({
+    id: randomUUID(), author_id: null, mentions: [], created_at: now(),
+  }),
+  calendar_events: () => ({
+    id: randomUUID(), provider_event_id: null, case_id: null,
+    description: null, location: null, all_day: false, attendees: [],
+    ai_briefing: null, ai_briefing_at: null, status: "confirmed",
+    created_at: now(), updated_at: now(),
   }),
   agent_jobs: () => ({
     id: randomUUID(),
@@ -587,6 +600,12 @@ function applySelect(table, rows, url) {
       ...row,
       orgs: db.orgs.find((o) => o.id === row.org_id) ?? null,
     }));
+  }
+  if (table === "org_members" && select.includes("profiles(")) {
+    return rows.map((row) => {
+      const profile = db.profiles.find((p) => p.id === row.user_id);
+      return { ...row, profiles: profile ? { display_name: profile.display_name } : null };
+    });
   }
   if (["cases", "invoices_in", "invoices_out", "quotes"].includes(table) && select.includes("companies(")) {
     return rows.map((row) => {
@@ -1089,6 +1108,15 @@ const server = http.createServer(async (req, res) => {
       [status, payload] = mailHub.handleSendMail(req, url, body, userFromAuthHeader(req));
     } else if (url.pathname.startsWith("/functions/v1/export-xrechnung")) {
       [status, payload] = mailHub.handleExportXrechnung(req, url, body, userFromAuthHeader(req));
+    } else if (url.pathname.startsWith("/functions/v1/calendar-sync")) {
+      const runner = verifyRunner(req);
+      if (!runner || ["disabled", "pending_approval"].includes(runner.status)) {
+        [status, payload] = [401, { error: "Runner-Authentifizierung fehlgeschlagen" }];
+      } else {
+        [status, payload] = mailHub.handleCalendarSync(req, url, body, runner);
+      }
+    } else if (url.pathname.startsWith("/functions/v1/export-org")) {
+      [status, payload] = mailHub.handleExportOrg(req, url, body, userFromAuthHeader(req));
     } else if (url.pathname.startsWith("/gmail/v1/users/me")) {
       [status, payload] = mailHub.handleGmailApi(req, url);
     } else if (url.pathname.startsWith("/storage/v1/object/")) {
@@ -1096,12 +1124,19 @@ const server = http.createServer(async (req, res) => {
       // Objekt-URL: /storage/v1/object/<bucket>/<pfad> → Schlüssel ist <pfad>.
       const rest = url.pathname.replace("/storage/v1/object/", "");
       const key = rest.replace(/^[^/]+\//, ""); // Bucket-Präfix entfernen
-      if (req.method === "POST" || req.method === "PUT") {
+      if (req.method === "GET") {
         db.mock_storage = db.mock_storage ?? {};
-        db.mock_storage[key] = (body && body.__rawBase64) || "";
-        persist();
+        const data = db.mock_storage[key];
+        if (data === undefined) { [status, payload] = [404, { error: "not found" }]; }
+        else { res.writeHead(200, { ...CORS, "Content-Type": "application/json" }); res.end(Buffer.from(data, "base64").toString("utf8")); return; }
+      } else {
+        if (req.method === "POST" || req.method === "PUT") {
+          db.mock_storage = db.mock_storage ?? {};
+          db.mock_storage[key] = (body && body.__rawBase64) || "";
+          persist();
+        }
+        [status, payload] = [200, { Key: rest }];
       }
-      [status, payload] = [200, { Key: rest }];
     } else if (url.pathname.startsWith("/realtime/")) {
       // Kein Websocket im Mock — PWA fällt auf Polling zurück.
       [status, payload] = [404, { message: "Realtime im Mock nicht verfügbar (Polling aktiv)" }];
@@ -1122,6 +1157,10 @@ const server = http.createServer(async (req, res) => {
 // Mail-Hub-Emulation (Etappe 1) + Cron-Ersatz für den Gmail-Sync
 const mailHub = createMailHub({ db, persist });
 setInterval(() => mailHub.enqueueSyncJobs(), 30_000);
+
+// Etappe 5: Insert-Trigger für neue Tabellen (Kommentare/@Mentions, Kalender)
+insertTriggers.thread_comments = (row) => mailHub.onThreadCommentInserted(row);
+insertTriggers.calendar_events = (row) => mailHub.onCalendarEventInserted(row);
 
 server.listen(PORT, () => {
   console.log(`[mock] Leitwerk-Mock-Backend läuft auf http://127.0.0.1:${PORT}`);

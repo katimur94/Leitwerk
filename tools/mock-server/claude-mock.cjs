@@ -271,6 +271,52 @@ function answerFor(prompt) {
     };
   }
 
+  // calendar_briefing (Etappe 5)
+  if (prompt.includes("schreibst ein kurzes Kontext-Briefing")) {
+    const title = (prompt.match(/Termin: (.*?) am /) || [])[1] || "der Termin";
+    const ctxLines = [...prompt.matchAll(/^- (.*?): (.*)$/gm)].map((m) => `${m[1]}: ${m[2]}`);
+    return {
+      briefing_md:
+        `**${title}** — die wichtigsten Punkte:\n` +
+        (ctxLines.length ? ctxLines.map((l) => `- ${l}`).join("\n") : "- Keine offenen Punkte bekannt.") +
+        "\n\nGut vorbereitet ins Gespräch. (Mock)",
+    };
+  }
+
+  // suggest_slots (Etappe 5) — Slots aus dem Prompt übernehmen
+  if (prompt.includes("entwirfst eine kurze Terminvorschlags-Antwort")) {
+    const replyTo = (prompt.match(/Antwort an: (\S+@\S+)/) || [])[1] || "kontakt@example.com";
+    const subject = (prompt.match(/Betreff des Threads: (.*)/) || [])[1] || "Terminvorschlag";
+    const slots = [...prompt.matchAll(/^- (.*?) \((\S+) – (\S+)\)$/gm)].map((m) => ({
+      label: m[1],
+      starts_at: m[2],
+      ends_at: m[3],
+    }));
+    const items = slots.map((s) => `<li>${s.label}</li>`).join("");
+    return {
+      subject: /^(re|aw):/i.test(subject) ? subject : `Re: ${subject}`,
+      body_html:
+        "<p>Guten Tag,</p><p>gern schlage ich folgende Termine vor:</p>" +
+        `<ul>${items}</ul><p>Passt Ihnen einer davon? (Mock)</p>`,
+      to_addrs: [{ email: replyTo }],
+      slots,
+    };
+  }
+
+  // weekly_report (Etappe 5)
+  if (prompt.includes("schreibst den Wochenrückblick")) {
+    return {
+      content_md:
+        "Solide Woche: Der Posteingang blieb überschaubar, offene Aufgaben wurden abgebaut " +
+        "und die Angebots-Pipeline ist gut gefüllt. Nächste Woche liegt der Fokus auf den " +
+        "offenen Rechnungen. (Mock)",
+      items: [
+        { title: "Offene Ausgangsrechnungen nachhalten", detail: "Fälligkeiten prüfen", entity_type: null, entity_id: null, action: "Finanzen öffnen" },
+        { title: "Angebote nachfassen", detail: "Pipeline aktiv halten", entity_type: null, entity_id: null, action: null },
+      ],
+    };
+  }
+
   // thread_summary
   if (prompt.includes("Fasse den folgenden E-Mail-Thread")) {
     return {

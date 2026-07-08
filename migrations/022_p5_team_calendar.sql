@@ -98,14 +98,16 @@ create trigger trg_thread_comment
 
 -- ---------- 3) Kalender: Briefing vor Terminen ----------
 -- Nach dem Sync: für baldige Termine (nächste 24h) ohne Briefing einen
--- calendar_briefing-Job einreihen (Automation auto_calendar_briefing, optional).
+-- calendar_briefing-Job einreihen. Das Briefing ist rein informativ (keine
+-- Außenwirkung) → kein Autonomie-Gate; es genügt ein aktiver Runner.
 create or replace function public.on_calendar_event_change()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
   if new.status <> 'cancelled'
      and new.ai_briefing is null
      and new.starts_at between now() and now() + interval '24 hours'
-     and (public.get_automation(new.org_id, 'auto_calendar_briefing')).id is not null
+     and exists (select 1 from public.runners r
+                  where r.org_id = new.org_id and r.status not in ('disabled','pending_approval'))
      and not exists (
        select 1 from public.agent_jobs
         where org_id = new.org_id and job_type = 'calendar_briefing'

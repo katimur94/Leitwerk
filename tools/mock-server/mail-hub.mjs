@@ -252,6 +252,39 @@ export function createMailHub({ db, persist }) {
           detail: { draft_id: draft.id }, executed_at: null, created_at: now(),
         });
       }
+      // Etappe-5-Demo: verbundener Kalender mit einem baldigen Termin
+      // (löst on_calendar_event_change → calendar_briefing aus).
+      if (!db.calendar_accounts.some((a) => a.org_id === orgId)) {
+        const calAcct = {
+          id: randomUUID(), org_id: orgId, user_id: userId, provider: "google",
+          calendar_ref: "primary", vault_secret_id: randomUUID(),
+          sync_cursor: null, sync_state: "ok", last_sync_at: now(), created_at: now(),
+        };
+        db.calendar_accounts.push(calAcct);
+        const kase = db.cases.find((c) => c.org_id === orgId) ?? null;
+        const inThreeHours = new Date(Date.now() + 3 * 3_600_000).toISOString();
+        const tomorrow = new Date(Date.now() + 28 * 3_600_000).toISOString();
+        const events = [
+          {
+            ...calEventDefaults(), org_id: orgId, account_id: calAcct.id,
+            provider_event_id: "mock-ev-1", case_id: kase?.id ?? null,
+            title: "Ortstermin mit Anna Meier (ACME Bau)",
+            starts_at: inThreeHours, ends_at: new Date(Date.parse(inThreeHours) + 3_600_000).toISOString(),
+            attendees: [{ name: "Anna Meier", email: "anna.meier@acme-bau.example" }],
+          },
+          {
+            ...calEventDefaults(), org_id: orgId, account_id: calAcct.id,
+            provider_event_id: "mock-ev-2", case_id: null,
+            title: "Team-Wochenplanung",
+            starts_at: tomorrow, ends_at: new Date(Date.parse(tomorrow) + 3_600_000).toISOString(),
+            attendees: [],
+          },
+        ];
+        for (const ev of events) {
+          db.calendar_events.push(ev);
+          onCalendarEventInserted(ev);
+        }
+      }
       enqueueSyncJobs();
       return [302, null, { Location: `http://localhost:5173/einstellungen/postfaecher?connected=${DEMO_EMAIL}` }];
     }
@@ -311,6 +344,7 @@ export function createMailHub({ db, persist }) {
             urgency: null,
             ai_summary: null,
             case_id: null,
+            assignee_id: null,
             snoozed_until: null,
             archived_at: null,
             deleted_at: null,
@@ -373,6 +407,43 @@ export function createMailHub({ db, persist }) {
       return [200, { storagePath: path }];
     }
     return [404, { error: `mail-sync: ${action} unbekannt` }];
+  }
+
+  // ---------- calendar-sync (/token /ingest) — Etappe 5 ----------
+  function handleCalendarSync(_req, url, body, runner) {
+    const action = url.pathname.split("/").filter(Boolean).pop();
+    const account = db.calendar_accounts.find(
+      (a) => a.id === body.accountId && a.org_id === runner.org_id,
+    );
+    if (!account) return [404, { error: "Kalender nicht gefunden" }];
+    if (action === "token") {
+      return [200, { accessToken: `mock-gcal-token:${account.id}`, expiresIn: 3600, calendarRef: account.calendar_ref }];
+    }
+    if (action === "ingest") {
+      let upserted = 0;
+      for (const ev of Array.isArray(body.events) ? body.events : []) {
+        if (!ev.provider_event_id || !ev.starts_at) continue;
+        let existing = db.calendar_events.find(
+          (e) => e.account_id === account.id && e.provider_event_id === ev.provider_event_id,
+        );
+        if (!existing) {
+          existing = { ...calEventDefaults(), org_id: account.org_id, account_id: account.id, provider_event_id: ev.provider_event_id };
+          db.calendar_events.push(existing);
+        }
+        Object.assign(existing, {
+          title: ev.title ?? "(ohne Titel)", description: ev.description ?? null,
+          location: ev.location ?? null, starts_at: ev.starts_at, ends_at: ev.ends_at ?? ev.starts_at,
+          all_day: ev.all_day ?? false, attendees: ev.attendees ?? [], status: ev.status ?? "confirmed",
+          updated_at: now(),
+        });
+        onCalendarEventInserted(existing);
+        upserted += 1;
+      }
+      Object.assign(account, { sync_cursor: body.cursor ?? null, sync_state: body.syncState ?? "ok", last_sync_at: now() });
+      persist();
+      return [200, { ok: true, events: upserted }];
+    }
+    return [404, { error: `calendar-sync: ${action} unbekannt` }];
   }
 
   // ---------- Trigger: on_mail_received / on_mail_sent (Migration 018) ----------
@@ -498,6 +569,50 @@ export function createMailHub({ db, persist }) {
         read_at: null, pushed_at: null, created_at: now(),
       });
     }
+  }
+
+  // Spiegel von notify_user (Migration 022): Notification an EINEN Nutzer.
+  function notifyUser(orgId, userId, kind, title, body, entityType, entityId) {
+    if (!db.org_members.some((m) => m.org_id === orgId && m.user_id === userId && m.is_active)) return;
+    db.notifications.push({
+      id: randomUUID(), org_id: orgId, user_id: userId, kind, title,
+      body: body ?? null, entity_type: entityType ?? null, entity_id: entityId ?? null,
+      read_at: null, pushed_at: null, created_at: now(),
+    });
+  }
+
+  // Trigger on_thread_comment (Migration 022): @Mentions benachrichtigen.
+  function onThreadCommentInserted(comment) {
+    const thread = db.mail_threads.find((t) => t.id === comment.thread_id);
+    for (const uid of comment.mentions ?? []) {
+      if (uid === comment.author_id) continue;
+      notifyUser(comment.org_id, uid, "mention",
+        `Erwähnt in „${thread?.subject ?? "Thread"}“`,
+        (comment.body ?? "").slice(0, 140), "mail_thread", comment.thread_id);
+    }
+    persist();
+  }
+
+  function calEventDefaults() {
+    return {
+      id: randomUUID(), provider_event_id: null, case_id: null, description: null,
+      location: null, all_day: false, attendees: [], ai_briefing: null,
+      ai_briefing_at: null, status: "confirmed", created_at: now(), updated_at: now(),
+    };
+  }
+
+  // Trigger on_calendar_event_change (Migration 022): Briefing vor baldigen Terminen.
+  function onCalendarEventInserted(event) {
+    const soon = Date.parse(event.starts_at) <= Date.now() + 24 * 3_600_000 &&
+      Date.parse(event.starts_at) >= Date.now();
+    const hasRunner = db.runners.some(
+      (r) => r.org_id === event.org_id && !["disabled", "pending_approval"].includes(r.status),
+    );
+    if (event.status !== "cancelled" && !event.ai_briefing && soon && hasRunner &&
+      !db.agent_jobs.some((j) => j.job_type === "calendar_briefing" && j.payload?.event_id === event.id)) {
+      pushJob(event.org_id, "calendar_briefing", { event_id: event.id }, 6);
+    }
+    persist();
   }
 
   // ---------- Regel-Engine light (Spiegel von evaluate_org_rules) ----------
@@ -926,6 +1041,39 @@ export function createMailHub({ db, persist }) {
         if (existing) Object.assign(existing, row);
         else db.embeddings.push(row);
       }
+
+    // ---------- Etappe 5 (Spiegel von apply_job_result_p5) ----------
+    } else if (job.job_type === "calendar_briefing") {
+      const event = db.calendar_events.find((e) => e.id === job.payload?.event_id);
+      if (event) {
+        event.ai_briefing = result.briefing_md ?? null;
+        event.ai_briefing_at = now();
+        event.updated_at = now();
+      }
+    } else if (job.job_type === "suggest_slots") {
+      const thr = db.mail_threads.find((t) => t.id === job.payload?.thread_id);
+      if (thr) {
+        const slotsHtml = (result.slots ?? []).map((s) => `<li>${s.label}</li>`).join("");
+        db.mail_drafts.push({
+          id: randomUUID(), org_id: job.org_id, account_id: thr.account_id, thread_id: thr.id,
+          created_by: null, source: "ai", job_id: job.id,
+          to_addrs: result.to_addrs ?? [], cc_addrs: [], subject: result.subject ?? "Terminvorschlag",
+          body_html: result.body_html ??
+            `<p>Guten Tag,</p><p>gern schlage ich folgende Termine vor:</p><ul>${slotsHtml}</ul><p>Passt Ihnen einer davon?</p>`,
+          attachments: [], status: "draft", send_after: null, sent_message_id: null,
+          created_at: now(), updated_at: now(),
+        });
+      }
+    } else if (job.job_type === "weekly_report") {
+      const today = now().slice(0, 10);
+      if (!db.briefings.some((b) => b.org_id === job.org_id && b.kind === "weekly" && b.for_date === today)) {
+        db.briefings.push({
+          id: randomUUID(), org_id: job.org_id, user_id: null, kind: "weekly",
+          for_date: today, content_md: result.content_md ?? "", items: result.items ?? [],
+          job_id: job.id, read_at: null, created_at: now(),
+        });
+        notifyOrg(job.org_id, "weekly_report", "Dein Wochenreport ist da", "briefing", null);
+      }
     }
     // semantic_search: kein Nebeneffekt — das Ergebnis (Query-Vektor) liest search_combined direkt.
     persist();
@@ -1250,6 +1398,85 @@ export function createMailHub({ db, persist }) {
           query: String(job.payload?.query ?? "").slice(0, 500),
         };
 
+      // ---------- Etappe 5 ----------
+      case "calendar_briefing": {
+        const event = db.calendar_events.find((e) => e.id === job.payload?.event_id);
+        if (!event) return null;
+        const kase = db.cases.find((c) => c.id === event.case_id);
+        const context = [];
+        if (event.case_id) {
+          for (const inv of db.invoices_out.filter(
+            (i) => i.org_id === job.org_id && i.case_id === event.case_id &&
+              ["sent", "overdue", "partially_paid"].includes(i.status),
+          )) {
+            context.push({ kind: "Offene Rechnung", detail: `${inv.invoice_number}: ${inv.gross_amount} € (${inv.status})` });
+          }
+        }
+        for (const att of (event.attendees ?? []).slice(0, 3)) {
+          const last = db.mail_messages
+            .filter((m) => m.org_id === job.org_id && (m.from_addr?.email ?? "").toLowerCase() === (att.email ?? "").toLowerCase())
+            .sort((a, b) => (a.sent_at > b.sent_at ? -1 : 1))[0];
+          if (last) context.push({ kind: `Letzte Mail von ${att.email}`, detail: `${last.subject ?? ""} (${last.sent_at ?? ""})` });
+        }
+        return {
+          jobId: job.id, jobType: "calendar_briefing", locale: "de-DE",
+          today: now().slice(0, 10),
+          event: {
+            event_id: event.id, title: event.title ?? "", starts_at: event.starts_at,
+            location: event.location, attendees: (event.attendees ?? []).map((a) => a.email).filter(Boolean),
+            case_number: kase?.case_number ?? null,
+          },
+          context,
+        };
+      }
+      case "suggest_slots": {
+        const thr = db.mail_threads.find((t) => t.id === job.payload?.thread_id);
+        if (!thr) return null;
+        const account = db.mail_accounts.find((a) => a.id === thr.account_id);
+        const busy = db.calendar_events
+          .filter((e) => e.org_id === job.org_id && e.status === "confirmed")
+          .map((e) => [Date.parse(e.starts_at), Date.parse(e.ends_at)]);
+        const dayNames = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+        const slots = [];
+        for (let day = 1; day <= 10 && slots.length < 3; day += 1) {
+          const base = new Date(Date.now() + day * 86_400_000);
+          if (base.getUTCDay() === 0 || base.getUTCDay() === 6) continue;
+          for (const hour of [10, 14]) {
+            if (slots.length >= 3) break;
+            const start = new Date(base); start.setUTCHours(hour, 0, 0, 0);
+            const end = new Date(start.getTime() + 3_600_000);
+            if (busy.some(([bs, be]) => start.getTime() < be && end.getTime() > bs)) continue;
+            const label = `${dayNames[start.getUTCDay()]} ${String(start.getUTCDate()).padStart(2, "0")}.${String(start.getUTCMonth() + 1).padStart(2, "0")}. ${String(hour).padStart(2, "0")}:00`;
+            slots.push({ starts_at: start.toISOString(), ends_at: end.toISOString(), label });
+          }
+        }
+        return {
+          jobId: job.id, jobType: "suggest_slots", locale: "de-DE", today: now().slice(0, 10),
+          thread: { thread_id: thr.id, subject: thr.subject ?? "", reply_to: (thr.participants ?? [])[0] ?? { email: "" } },
+          free_slots: slots, signature_html: account?.signature_html ?? null,
+        };
+      }
+      case "weekly_report": {
+        const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
+        const org = db.orgs.find((o) => o.id === job.org_id);
+        const pipeline = db.quotes
+          .filter((q) => q.org_id === job.org_id && ["sent", "followed_up"].includes(q.status))
+          .reduce((sum, q) => sum + Math.round((q.gross_amount ?? 0) * 100), 0);
+        return {
+          jobId: job.id, jobType: "weekly_report", locale: "de-DE", for_date: now().slice(0, 10),
+          org_name: org?.name ?? "",
+          stats: {
+            mails_handled: db.mail_messages.filter((m) => m.org_id === job.org_id && m.created_at >= weekAgo).length,
+            tasks_done: db.tasks.filter((t) => t.org_id === job.org_id && t.status === "done").length,
+            tasks_open: db.tasks.filter((t) => t.org_id === job.org_id && ["open", "in_progress"].includes(t.status)).length,
+            invoices_sent: db.invoices_out.filter((i) => i.org_id === job.org_id && i.sent_at).length,
+            invoices_paid: db.invoices_out.filter((i) => i.org_id === job.org_id && i.paid_at).length,
+            pipeline_value_cents: pipeline,
+            ai_accuracy: null,
+          },
+        };
+      }
+
       default:
         return null;
     }
@@ -1467,6 +1694,29 @@ export function createMailHub({ db, persist }) {
       return [200, results.slice(0, 20)];
     }
 
+    // ---------- Etappe 5 ----------
+    if (fn === "assign_thread") {
+      const thread = db.mail_threads.find((t) => t.id === body.p_thread);
+      if (!thread) return [400, { message: "Thread nicht gefunden" }];
+      const assignee = body.p_assignee ?? null;
+      if (assignee && !db.org_members.some(
+        (m) => m.org_id === thread.org_id && m.user_id === assignee && m.is_active,
+      )) return [400, { message: "Zuweisung nur an aktive Mitglieder" }];
+      const previous = thread.assignee_id ?? null;
+      thread.assignee_id = assignee;
+      thread.updated_at = now();
+      if (assignee && assignee !== previous) {
+        notifyUser(thread.org_id, assignee, "thread_assigned",
+          `Dir zugewiesen: ${thread.subject ?? "E-Mail-Thread"}`, null, "mail_thread", thread.id);
+        if (thread.case_id) {
+          pushCaseEvent(thread.org_id, thread.case_id, "thread_assigned",
+            "Thread zugewiesen", "mail_thread", thread.id, "user");
+        }
+      }
+      persist();
+      return [204, null];
+    }
+
     return null;
   }
 
@@ -1505,6 +1755,8 @@ export function createMailHub({ db, persist }) {
         // Etappe 4: Wissen destillieren + Embeddings nachziehen (Nacht-Batch)
         ["knowledge_distill", 9],
         ["embed_backlog", 9],
+        // Etappe 5: Wochenrückblick (im Mock aggressiv statt nur freitags)
+        ["weekly_report", 8],
       ]) {
         const recent = db.agent_jobs.some(
           (j) => j.org_id === org.id && j.job_type === jobType &&
@@ -1585,12 +1837,45 @@ export function createMailHub({ db, persist }) {
     return [200, { ok: true, xmlStoragePath: path, xml }];
   }
 
+  // ---------- export-org (Etappe 5): JSON-Snapshot, nur Owner/Admin ----------
+  const EXPORT_TABLES = [
+    "org_profile", "companies", "contacts", "cases", "mail_threads", "mail_messages",
+    "thread_comments", "tasks", "calendar_events", "invoices_in", "invoices_out",
+    "quotes", "notes", "knowledge_items", "meetings", "automations", "org_rules",
+  ];
+  function handleExportOrg(_req, _url, body, user) {
+    if (!user) return [401, { error: "Nicht angemeldet" }];
+    const orgId = body.orgId;
+    const member = db.org_members.find((m) => m.org_id === orgId && m.user_id === user.id && m.is_active);
+    if (!member || !["owner", "admin"].includes(member.role)) {
+      return [403, { error: "Nur Owner/Admin dürfen exportieren" }];
+    }
+    const counts = {};
+    const snapshot = { exported_at: now(), org_id: orgId, format: "leitwerk-export-v1" };
+    for (const table of EXPORT_TABLES) {
+      const rows = (db[table] ?? []).filter((r) => r.org_id === orgId);
+      snapshot[table] = rows;
+      counts[table] = rows.length;
+    }
+    const path = `org/${orgId}/export/${now().replace(/[:.]/g, "-")}.json`;
+    db.mock_storage = db.mock_storage ?? {};
+    db.mock_storage[path] = Buffer.from(JSON.stringify(snapshot), "utf8").toString("base64");
+    persist();
+    // Mock: "signierte URL" zeigt auf den lokalen Storage-Stub
+    const signedUrl = `http://127.0.0.1:54321/storage/v1/object/exports/${path}`;
+    return [200, { ok: true, storagePath: path, signedUrl, counts }];
+  }
+
   return {
     handleGmailApi,
     handleOauthGmail,
     handleMailSync,
     handleSendMail,
     handleExportXrechnung,
+    handleExportOrg,
+    handleCalendarSync,
+    onThreadCommentInserted,
+    onCalendarEventInserted,
     buildContext,
     applyJobResult,
     rpc,

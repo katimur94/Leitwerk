@@ -710,7 +710,53 @@ try {
   ]);
   await page.keyboard.press("Escape");
 
-  // ---- 40 Regel-Builder (Etappe 0.5) ----
+  // ---- 40 Geteiltes Postfach: Zuweisung + interner Kommentar (Etappe 5) ----
+  await page.goto(`${BASE}/posteingang`);
+  await page.waitForSelector('button:has-text("Rechnung RE-88123"), li:has-text("Rechnung")');
+  await page.locator('button:has-text("Rechnung RE-88123")').first().click();
+  await page.waitForSelector('select[aria-label="Thread zuweisen"]');
+  await page.selectOption('select[aria-label="Thread zuweisen"]', { index: 1 });
+  await sleep(500);
+  await page.fill("#thread-comment", "Habe ich gesehen — kümmere mich morgen darum.");
+  await page.click('button:has-text("Kommentieren")');
+  await sleep(800);
+  await capture("zuweisung-kommentar", [
+    { at: 'select[aria-label="Thread zuweisen"]', label: "Thread einem Mitglied zuweisen (assign_thread)" },
+    { at: 'h4:has-text("Interne Kommentare")', label: "Intern kommentieren — @Name benachrichtigt", side: "left" },
+    { at: "#thread-comment", label: "Kein Weiterleiten-Chaos (MASTERPLAN §4 Y)", side: "left" },
+  ]);
+
+  // ---- 41 Kalender mit KI-Kontext-Briefing (Etappe 5) ----
+  await page.goto(`${BASE}/kalender`);
+  await waitFor(async () => {
+    await sleep(2000);
+    return (await page.locator(':text("KI-Briefing")').count()) > 0;
+  }, 120_000, "Kalender-Briefing (calendar_briefing)");
+  await capture("kalender", [
+    { at: 'p:has-text("Ortstermin mit Anna Meier")', label: "Termin aus dem Google-Kalender (Runner-Sync)" },
+    { at: 'span:has-text("KI-Briefing")', label: "Automatisches Kontext-Briefing vor dem Termin (violett = KI)" },
+    { at: 'h2:has-text("Fristenkalender")', label: "Fristenkalender = wiederkehrende Aufgaben", side: "left" },
+  ]);
+
+  // ---- 42 Datenexport (Etappe 5) ----
+  await page.click('button:has-text("Export erzeugen")');
+  await waitFor(async () => (await page.locator(':text("Export bereit")').count()) > 0, 15_000, "Datenexport");
+  await capture("datenexport", [
+    { at: 'button:has-text("Export erzeugen")', label: "Kompletter Org-Export als JSON (kein Lock-in)" },
+    { at: ':text("Export bereit")', label: "Nur Owner/Admin — Datei im Export-Bucket", side: "left" },
+  ]);
+
+  // ---- 43 Wochenreport (Etappe 5) ----
+  await page.goto(`${BASE}/`);
+  await waitFor(async () => {
+    await sleep(2000);
+    return (await page.locator('span:text-is("Wochenreport")').count()) > 0;
+  }, 120_000, "Wochenreport (weekly_report)");
+  await capture("wochenreport", [
+    { at: 'span:text-is("Wochenreport")', label: "Freitags: KI-Wochenrückblick (briefings kind='weekly')" },
+  ]);
+
+  // ---- 44 Regel-Builder (Etappe 0.5) ----
   await page.goto(`${BASE}/einstellungen/regeln`);
   await page.waitForSelector('h3:has-text("Neue Regel")');
   await page.fill("#rule-name", "Rechnungen sofort melden");
@@ -731,7 +777,7 @@ try {
     { at: 'li:has-text("Rechnungen sofort melden")', label: "Regel aktiv — pausieren oder löschen jederzeit" },
   ]);
 
-  // ---- 42 Dark Mode ----
+  // ---- 46 Dark Mode ----
   await page.click('nav button[title="Design wechseln"]');
   await sleep(400);
   await capture("dark-mode", [
