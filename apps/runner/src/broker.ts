@@ -133,6 +133,15 @@ export class BrokerClient {
     return { messages: data.messages ?? 0, attachments: data.attachments ?? 0 };
   }
 
+  /** Anhangs-Blob aus dem Storage laden (z. B. für extract_invoice). */
+  async mailDownload(storagePath: string): Promise<Uint8Array> {
+    const data = (await this.post("mail-sync", "/download", { storagePath })) as {
+      data?: string;
+    };
+    if (!data.data) throw new Error("mail-sync /download lieferte keine Daten");
+    return new Uint8Array(Buffer.from(data.data, "base64"));
+  }
+
   /** Anhangs-Blob in den Storage-Bucket 'attachments' hochladen. */
   async mailAttachment(
     accountId: string,

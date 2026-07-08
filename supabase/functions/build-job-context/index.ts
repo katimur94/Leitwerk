@@ -417,6 +417,73 @@ async function buildContext(
       };
     }
 
+    // P3: Rechnungsdaten aus Mail/Anhang extrahieren
+    case "extract_invoice": {
+      const { data: message } = await db
+        .from("mail_messages")
+        .select("id, org_id, subject, from_addr, body_text")
+        .eq("id", String(job.payload.message_id ?? ""))
+        .maybeSingle();
+      if (!message || message.org_id !== job.org_id) return null;
+      const { data: attachments } = await db
+        .from("mail_attachments")
+        .select("id, filename, mime_type, storage_path")
+        .eq("message_id", message.id);
+      return {
+        jobId: job.id,
+        jobType: "extract_invoice",
+        locale: "de-DE",
+        today: new Date().toISOString().slice(0, 10),
+        message: {
+          subject: message.subject ?? "",
+          from: message.from_addr ?? { email: "" },
+          body_excerpt: excerpt(message.body_text, 6000),
+        },
+        attachments: attachments ?? [],
+      };
+    }
+
+    // P3: KI-Mahnentwurf pro Stufe (Versand erst nach Freigabe)
+    case "draft_dunning": {
+      const { data: invoice } = await db
+        .from("invoices_out")
+        .select("*, companies(name), contacts(first_name, last_name)")
+        .eq("id", String(job.payload.invoice_id ?? ""))
+        .maybeSingle();
+      if (!invoice || invoice.org_id !== job.org_id) return null;
+      const level = Number(job.payload.level ?? 1);
+      const { data: profile } = await db
+        .from("org_profile")
+        .select("legal_name, iban, bank_name, dunning_fees")
+        .eq("org_id", job.org_id)
+        .maybeSingle();
+      const company = invoice.companies as { name?: string } | null;
+      const contact = invoice.contacts as { first_name?: string; last_name?: string } | null;
+      const fees = (profile?.dunning_fees ?? {}) as Record<string, number>;
+      return {
+        jobId: job.id,
+        jobType: "draft_dunning",
+        locale: "de-DE",
+        level,
+        fee: Number(fees[String(level)] ?? 0),
+        invoice: {
+          invoice_number: invoice.invoice_number,
+          invoice_date: invoice.invoice_date,
+          due_date: invoice.due_date,
+          gross_amount: Number(invoice.gross_amount),
+          currency: invoice.currency,
+          recipient_name:
+            company?.name ??
+            [contact?.first_name, contact?.last_name].filter(Boolean).join(" "),
+        },
+        org: {
+          legal_name: profile?.legal_name ?? "",
+          iban: profile?.iban ?? null,
+          bank_name: profile?.bank_name ?? null,
+        },
+      };
+    }
+
     // P1: Ein-Absatz-Zusammenfassung langer Threads
     case "thread_summary": {
       const { data: thread } = await db

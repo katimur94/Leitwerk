@@ -227,6 +227,22 @@ Deno.serve(async (req) => {
         return await handleIngest(db, runner, req);
       case "attachment":
         return await handleAttachment(db, runner, req);
+      case "download": {
+        // Blob aus dem Storage (nur Pfade der eigenen Org)
+        const body = await req.json().catch(() => ({}));
+        const path = String(body.storagePath ?? "");
+        if (!path.startsWith(`org/${runner.org_id}/`)) {
+          return json({ error: "Pfad gehört nicht zu dieser Organisation" }, 403);
+        }
+        const { data, error } = await db.storage.from("attachments").download(path);
+        if (error || !data) return json({ error: `Download: ${error?.message}` }, 404);
+        const bytes = new Uint8Array(await data.arrayBuffer());
+        let bin = "";
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        return json({ data: btoa(bin) });
+      }
       default:
         return json({ error: `Unbekannte Aktion: ${action}` }, 404);
     }

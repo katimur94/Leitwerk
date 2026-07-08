@@ -3,9 +3,13 @@
 import type { SkillResult } from "@leitwerk/shared";
 import type { BrokerClient } from "../broker";
 
-/** Abhängigkeiten für Connector-Skills (Sync-Jobs ohne KI). */
+import type { AiProvider } from "../providers";
+
+/** Abhängigkeiten für Connector-/Hybrid-Skills mit execute(). */
 export interface SkillDeps {
   broker: BrokerClient;
+  /** Für Hybrid-Skills (z. B. extract_invoice: erst Parser, dann KI) */
+  provider: AiProvider;
 }
 
 export interface Skill {

@@ -1,8 +1,10 @@
 import { caseMatchSkill } from "./case-match";
 import { classifyEmailSkill } from "./classify-email";
+import { draftDunningSkill } from "./draft-dunning";
 import { draftReplySkill } from "./draft-reply";
 import { echoSkill } from "./echo";
 import { extractCommitmentsSkill } from "./extract-commitments";
+import { extractInvoiceSkill } from "./extract-invoice";
 import { followupCheckSkill } from "./followup-check";
 import { gapScanSkill } from "./gap-scan";
 import { morningBriefingSkill } from "./morning-briefing";
@@ -22,6 +24,8 @@ const registry = new Map<string, Skill>(
     gapScanSkill,
     morningBriefingSkill,
     followupCheckSkill,
+    extractInvoiceSkill,
+    draftDunningSkill,
   ].map((skill) => [skill.type, skill]),
 );
 
