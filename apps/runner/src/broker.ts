@@ -39,18 +39,21 @@ export class BrokerClient {
     private readonly auth?: BrokerAuth,
   ) {}
 
-  private async post(
-    fn: "runner-broker" | "build-job-context",
-    path: string,
-    body: unknown,
-  ): Promise<unknown> {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
+  private authHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    const headers: Record<string, string> = { ...extra };
     if (this.auth) {
       headers["x-runner-id"] = this.auth.runnerId;
       headers["x-runner-token"] = this.auth.runnerToken;
     }
+    return headers;
+  }
+
+  private async post(
+    fn: "runner-broker" | "build-job-context" | "mail-sync",
+    path: string,
+    body: unknown,
+  ): Promise<unknown> {
+    const headers = this.authHeaders({ "Content-Type": "application/json" });
     const res = await fetch(`${this.functionsUrl}/${fn}${path}`, {
       method: "POST",
       headers,
@@ -105,6 +108,52 @@ export class BrokerClient {
     return contextResponseSchema.parse(
       await this.post("build-job-context", "", { jobId }),
     ).context;
+  }
+
+  // ---------- mail-sync (Etappe 1): Gmail-Connector-Endpunkte ----------
+
+  /** Kurzlebiges Gmail-Access-Token — das Refresh-Token bleibt im Vault. */
+  async mailToken(accountId: string): Promise<{ accessToken: string; emailAddress: string }> {
+    const data = (await this.post("mail-sync", "/token", { accountId })) as {
+      accessToken?: string;
+      emailAddress?: string;
+    };
+    if (!data.accessToken || !data.emailAddress) {
+      throw new Error("mail-sync /token lieferte kein Access-Token");
+    }
+    return { accessToken: data.accessToken, emailAddress: data.emailAddress };
+  }
+
+  /** Batch-Ingest synchronisierter Nachrichten (Dedupe serverseitig). */
+  async mailIngest(payload: unknown): Promise<{ messages: number; attachments: number }> {
+    const data = (await this.post("mail-sync", "/ingest", payload)) as {
+      messages?: number;
+      attachments?: number;
+    };
+    return { messages: data.messages ?? 0, attachments: data.attachments ?? 0 };
+  }
+
+  /** Anhangs-Blob in den Storage-Bucket 'attachments' hochladen. */
+  async mailAttachment(
+    accountId: string,
+    filename: string,
+    mime: string,
+    bytes: Uint8Array,
+  ): Promise<string> {
+    const params = new URLSearchParams({ accountId, filename, mime });
+    const res = await fetch(`${this.functionsUrl}/mail-sync/attachment?${params}`, {
+      method: "POST",
+      headers: this.authHeaders({ "Content-Type": "application/octet-stream" }),
+      body: bytes,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      storagePath?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.storagePath) {
+      throw new Error(data.error ?? `Anhang-Upload HTTP ${res.status}`);
+    }
+    return data.storagePath;
   }
 }
 

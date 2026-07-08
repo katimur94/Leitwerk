@@ -32,7 +32,10 @@ export async function executeJob(
     const prompt = skill.buildPrompt(context);
 
     let skillResult;
-    if (prompt === null) {
+    if (prompt === null && skill.execute) {
+      // Connector-Skill (z. B. gmail-sync): asynchrone Arbeit ohne KI
+      skillResult = await skill.execute(context, { broker });
+    } else if (prompt === null) {
       // Reiner Sync-Job ohne KI-Aufruf
       skillResult = skill.parse("", context);
     } else {
