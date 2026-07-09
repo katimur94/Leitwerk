@@ -285,6 +285,43 @@ export function createMailHub({ db, persist }) {
           onCalendarEventInserted(ev);
         }
       }
+      // Etappe-6-Demo: Kontenrahmen, ein Bankumsatz (passt zur überfälligen
+      // ACME-Rechnung → payment_match), ein Vertrag mit naher Kündigungsfrist.
+      if (!db.accounting_settings.some((a) => a.org_id === orgId)) {
+        db.accounting_settings.push({
+          org_id: orgId, chart_of_accounts: "SKR03", consultant_number: 12345, client_number: 6789,
+          fiscal_year_start: 1, acct_revenue_19: "8400", acct_revenue_7: "8300", acct_revenue_0: "8125",
+          acct_receivables: "1400", acct_payables: "1600", acct_bank: "1200", acct_expense_default: "4980",
+          vendor_account_start: 70000, customer_account_start: 10000, updated_at: now(),
+        });
+      }
+      if (!db.bank_connections.some((c) => c.org_id === orgId)) {
+        const conn = { id: randomUUID(), org_id: orgId, provider: "csv", display_name: "Geschäftskonto",
+          iban: "DE00120300000000202051", consent_expires_at: null, sync_state: "ok",
+          last_sync_at: now(), created_at: now() };
+        db.bank_connections.push(conn);
+        const acmeInvoice = db.invoices_out.find((i) => i.org_id === orgId);
+        db.bank_transactions.push({
+          id: randomUUID(), org_id: orgId, connection_id: conn.id, provider_tx_id: "mock-tx-1",
+          booked_on: now().slice(0, 10), value_date: now().slice(0, 10),
+          amount: acmeInvoice ? Number(acmeInvoice.gross_amount) : 1190, currency: "EUR",
+          counterpart_name: "ACME Bau GmbH", counterpart_iban: "DE00500105170000000001",
+          purpose: `Zahlung Rechnung ${acmeInvoice?.invoice_number ?? "RE-2026-0001"}`,
+          end_to_end_ref: null, match_status: "unmatched", created_at: now(),
+        });
+      }
+      if (!db.contracts.some((c) => c.org_id === orgId)) {
+        const notice = new Date(Date.now() + 26 * 86_400_000).toISOString().slice(0, 10);
+        db.contracts.push({
+          id: randomUUID(), org_id: orgId, company_id: null, case_id: null,
+          title: "Leasing Transporter", category: "leasing", status: "active", contract_number: "LS-2024-7",
+          starts_on: "2024-01-01", ends_on: null, auto_renews: true, renewal_months: 12,
+          notice_period_months: 3, next_renewal_on: null, notice_deadline: notice,
+          amount: 349, billing_cycle: "monthly", yearly_cost: 4188, document_id: null,
+          extraction: {}, extraction_confidence: null, notes: null, notice_given_at: null,
+          created_at: now(), updated_at: now(),
+        });
+      }
       enqueueSyncJobs();
       return [302, null, { Location: `http://localhost:5173/einstellungen/postfaecher?connected=${DEMO_EMAIL}` }];
     }
@@ -590,6 +627,23 @@ export function createMailHub({ db, persist }) {
         `Erwähnt in „${thread?.subject ?? "Thread"}“`,
         (comment.body ?? "").slice(0, 140), "mail_thread", comment.thread_id);
     }
+    persist();
+  }
+
+  // Spiegel von apply_payment_match (Migration 012): bestätigter Match verbucht
+  // die Zahlung auf der Ausgangsrechnung.
+  function onPaymentMatchWrite(row) {
+    if (row.status !== "confirmed" || !row.invoice_out_id) return;
+    const inv = db.invoices_out.find((i) => i.id === row.invoice_out_id);
+    if (!inv) return;
+    inv.paid_amount = Math.round((Number(inv.paid_amount ?? 0) + Number(row.matched_amount ?? 0)) * 100) / 100;
+    if (inv.paid_amount >= Number(inv.gross_amount)) {
+      inv.status = "paid";
+      inv.paid_at = now().slice(0, 10);
+    } else if (inv.paid_amount > 0) {
+      inv.status = "partially_paid";
+    }
+    inv.updated_at = now();
     persist();
   }
 
@@ -1074,6 +1128,81 @@ export function createMailHub({ db, persist }) {
         });
         notifyOrg(job.org_id, "weekly_report", "Dein Wochenreport ist da", "briefing", null);
       }
+
+    // ---------- Etappe 6 (Spiegel von apply_job_result_p6) ----------
+    } else if (job.job_type === "payment_match") {
+      for (const m of result.matches ?? []) {
+        if (!m.transaction_id) continue;
+        db.payment_matches.push({
+          id: randomUUID(), org_id: job.org_id, transaction_id: m.transaction_id,
+          invoice_out_id: m.invoice_out_id ?? null, invoice_in_id: m.invoice_in_id ?? null,
+          matched_amount: m.matched_amount ?? 0, confidence: m.confidence ?? null,
+          matched_by: "ai", status: "suggested", job_id: job.id, confirmed_by: null, created_at: now(),
+        });
+        const tx = db.bank_transactions.find((t) => t.id === m.transaction_id);
+        if (tx && tx.match_status === "unmatched") tx.match_status = "suggested";
+      }
+    } else if (job.job_type === "account_assign") {
+      const inv = db.invoices_in.find((i) => i.id === job.payload?.invoice_in_id);
+      if (inv) inv.extraction = { ...(inv.extraction ?? {}), suggested_account: result.account, account_confidence: result.confidence };
+    } else if (job.job_type === "time_suggest") {
+      for (const e of result.entries ?? []) {
+        db.time_entries.push({
+          id: randomUUID(), org_id: job.org_id, user_id: job.payload?.user_id ?? null,
+          case_id: e.case_id ?? null, task_id: null, work_date: e.work_date ?? now().slice(0, 10),
+          started_at: null, ended_at: null, minutes: Math.max(1, Math.min(1440, e.minutes ?? 30)),
+          description: e.description ?? null, is_billable: !!e.is_billable, hourly_rate: null,
+          invoice_id: null, source: "ai_suggested", locked_at: null, created_at: now(), updated_at: now(),
+        });
+      }
+    } else if (job.job_type === "transcribe_call") {
+      const call = db.call_logs.find((c) => c.id === job.payload?.call_id);
+      if (call) {
+        call.transcript = result.transcript ?? null; call.job_id = job.id; call.updated_at = now();
+        if (!db.agent_jobs.some((j) => j.job_type === "summarize_call" && j.payload?.call_id === call.id)) {
+          pushJob(job.org_id, "summarize_call", { call_id: call.id }, 4);
+        }
+      }
+    } else if (job.job_type === "summarize_call") {
+      const call = db.call_logs.find((c) => c.id === job.payload?.call_id);
+      if (call) {
+        call.summary = result.summary ?? call.summary; call.outcome = result.outcome ?? null; call.updated_at = now();
+        if (result.follow_up_title) {
+          db.tasks.push({
+            id: randomUUID(), org_id: job.org_id, case_id: call.case_id ?? null, title: result.follow_up_title,
+            description: "Aus Anruf", status: "open", due_at: null, assignee_id: null, created_by: null,
+            source: "manual", source_entity_type: "call_log", source_entity_id: call.id, job_id: job.id,
+            recurrence: null, completed_at: null, created_at: now(), updated_at: now(),
+          });
+          call.follow_up_task_id = db.tasks.at(-1).id;
+        }
+      }
+    } else if (job.job_type === "extract_contract") {
+      const contract = db.contracts.find((c) => c.id === job.payload?.contract_id);
+      if (contract) {
+        Object.assign(contract, {
+          extraction: result, extraction_confidence: result.confidence ?? null,
+          title: result.title || contract.title, category: result.category ?? contract.category,
+          amount: result.amount ?? contract.amount, billing_cycle: result.billing_cycle ?? contract.billing_cycle,
+          notice_period_months: result.notice_period_months ?? contract.notice_period_months,
+          notice_deadline: result.notice_deadline ?? contract.notice_deadline,
+          ends_on: result.ends_on ?? contract.ends_on, updated_at: now(),
+        });
+      }
+    } else if (job.job_type === "contract_watch") {
+      let added = 0;
+      for (const f of result.findings ?? []) {
+        if (db.agent_findings.some((x) => x.org_id === job.org_id && x.dedupe_key === (f.dedupe_key ?? f.title))) continue;
+        db.agent_findings.push({
+          id: randomUUID(), org_id: job.org_id, case_id: null, kind: "risk",
+          severity: f.severity ?? 3, title: f.title, description: f.description ?? null,
+          suggested_action: null, entity_type: "contract", entity_id: f.contract_id ?? null,
+          job_id: job.id, status: "open", resolved_by: null, resolved_at: null,
+          dedupe_key: f.dedupe_key ?? f.title, created_at: now(),
+        });
+        added += 1;
+      }
+      if (added > 0) notifyOrg(job.org_id, "contract_watch", `${added} Vertrags-Fristen im Blick`, "contract", null);
     }
     // semantic_search: kein Nebeneffekt — das Ergebnis (Query-Vektor) liest search_combined direkt.
     persist();
@@ -1477,6 +1606,71 @@ export function createMailHub({ db, persist }) {
         };
       }
 
+      // ---------- Etappe 6 ----------
+      case "payment_match": {
+        const tx = db.bank_transactions.filter((t) => t.org_id === job.org_id && t.match_status === "unmatched");
+        if (tx.length === 0) return null;
+        return {
+          jobId: job.id, jobType: "payment_match", locale: "de-DE",
+          transactions: tx.map((t) => ({ transaction_id: t.id, amount: Number(t.amount), booked_on: t.booked_on,
+            counterpart_name: t.counterpart_name ?? "", purpose: t.purpose ?? "" })),
+          open_invoices_out: db.invoices_out
+            .filter((i) => i.org_id === job.org_id && ["sent", "overdue", "partially_paid"].includes(i.status))
+            .map((i) => ({ invoice_out_id: i.id, number: i.invoice_number, gross: Number(i.gross_amount),
+              company: db.companies.find((c) => c.id === i.company_id)?.name ?? "" })),
+          open_invoices_in: db.invoices_in
+            .filter((i) => i.org_id === job.org_id && i.status === "approved")
+            .map((i) => ({ invoice_in_id: i.id, number: i.invoice_number ?? "", gross: Number(i.gross_amount ?? 0), issuer: "" })),
+        };
+      }
+      case "contract_watch": {
+        const nowMs = Date.now();
+        return {
+          jobId: job.id, jobType: "contract_watch", locale: "de-DE", today: now().slice(0, 10),
+          contracts: db.contracts
+            .filter((c) => c.org_id === job.org_id && ["active", "notice_given"].includes(c.status) && c.notice_deadline)
+            .map((c) => ({ contract_id: c.id, title: c.title, notice_deadline: c.notice_deadline,
+              days_until_deadline: Math.floor((Date.parse(c.notice_deadline) - nowMs) / 86_400_000),
+              yearly_cost: c.yearly_cost ? Number(c.yearly_cost) : null })),
+        };
+      }
+      case "time_suggest": {
+        const forDate = now().slice(0, 10);
+        const signals = db.calendar_events
+          .filter((e) => e.org_id === job.org_id && (e.starts_at ?? "").slice(0, 10) === forDate)
+          .map((e) => ({ kind: "Termin", case_id: e.case_id,
+            detail: e.title ?? "", minutes: Math.max(15, Math.round((Date.parse(e.ends_at) - Date.parse(e.starts_at)) / 60000)) }));
+        return { jobId: job.id, jobType: "time_suggest", locale: "de-DE",
+          user_id: job.payload?.user_id ?? db.org_members.find((m) => m.org_id === job.org_id)?.user_id ?? null,
+          for_date: forDate, signals };
+      }
+      case "account_assign": {
+        const inv = db.invoices_in.find((i) => i.id === job.payload?.invoice_in_id);
+        if (!inv) return null;
+        return { jobId: job.id, jobType: "account_assign", locale: "de-DE", invoice_in_id: inv.id,
+          issuer: db.companies.find((c) => c.id === inv.company_id)?.name ?? "",
+          gross_amount: inv.gross_amount ? Number(inv.gross_amount) : null, chart_of_accounts: "SKR03",
+          known_accounts: [{ account: "4980", label: "Sonstiger Aufwand" }, { account: "4930", label: "Bürobedarf" }] };
+      }
+      case "transcribe_call": {
+        const call = db.call_logs.find((c) => c.id === job.payload?.call_id);
+        if (!call || !call.audio_storage_path) return null;
+        return { jobId: job.id, jobType: "transcribe_call", locale: "de-DE", call_id: call.id, audio_storage_path: call.audio_storage_path };
+      }
+      case "summarize_call": {
+        const call = db.call_logs.find((c) => c.id === job.payload?.call_id);
+        if (!call) return null;
+        return { jobId: job.id, jobType: "summarize_call", locale: "de-DE",
+          call: { call_id: call.id, counterpart: call.phone_number ?? "", case_number: null,
+            transcript_excerpt: (call.transcript ?? "").slice(0, 8000) } };
+      }
+      case "extract_contract": {
+        const contract = db.contracts.find((c) => c.id === job.payload?.contract_id);
+        if (!contract) return null;
+        return { jobId: job.id, jobType: "extract_contract", locale: "de-DE", today: now().slice(0, 10),
+          contract_id: contract.id, document_text: String(job.payload?.document_text ?? contract.notes ?? "") };
+      }
+
       default:
         return null;
     }
@@ -1717,7 +1911,44 @@ export function createMailHub({ db, persist }) {
       return [204, null];
     }
 
+    // ---------- Etappe 6 ----------
+    if (fn === "bill_time_entries") {
+      const invoice = db.invoices_out.find((i) => i.id === body.p_invoice);
+      if (!invoice) return [400, { message: "Rechnung nicht gefunden" }];
+      if (invoice.status !== "draft") return [400, { message: "Nur Entwürfe können bebucht werden" }];
+      let pos = Math.max(0, ...db.invoice_items.filter((it) => it.invoice_id === invoice.id).map((it) => it.position));
+      let n = 0;
+      for (const id of body.p_entry_ids ?? []) {
+        const e = db.time_entries.find((x) => x.id === id && x.org_id === invoice.org_id &&
+          x.is_billable && !x.invoice_id && !x.locked_at);
+        if (!e) continue;
+        const rate = Number(e.hourly_rate ?? 0);
+        pos += 1;
+        db.invoice_items.push({
+          id: randomUUID(), invoice_id: invoice.id, position: pos,
+          description: `${e.description ?? "Arbeitszeit"} (${e.work_date})`,
+          quantity: Math.round((e.minutes / 60) * 100) / 100, unit: "Std", unit_price: rate,
+          vat_rate: 19, net_total: 0,
+        });
+        recalcDocTotalsFor(invoice.id);
+        Object.assign(e, { invoice_id: invoice.id, hourly_rate: rate, locked_at: now() });
+        n += 1;
+      }
+      persist();
+      return [200, n];
+    }
+
     return null;
+  }
+
+  // Positions-Summen für eine Ausgangsrechnung neu berechnen (Spiegel Trigger 020).
+  function recalcDocTotalsFor(invoiceId) {
+    const items = db.invoice_items.filter((i) => i.invoice_id === invoiceId);
+    for (const it of items) it.net_total = Math.round(it.quantity * it.unit_price * 100) / 100;
+    const net = items.reduce((s, i) => s + i.net_total, 0);
+    const vat = items.reduce((s, i) => s + Math.round(i.net_total * i.vat_rate) / 100, 0);
+    const inv = db.invoices_out.find((i) => i.id === invoiceId);
+    if (inv) Object.assign(inv, { net_amount: Math.round(net * 100) / 100, vat_amount: Math.round(vat * 100) / 100, gross_amount: Math.round((net + vat) * 100) / 100, updated_at: now() });
   }
 
   // ---------- Cron-Ersatz: Sync alle 30 s + Wächter/Briefing/Follow-ups ----------
@@ -1757,6 +1988,9 @@ export function createMailHub({ db, persist }) {
         ["embed_backlog", 9],
         // Etappe 5: Wochenrückblick (im Mock aggressiv statt nur freitags)
         ["weekly_report", 8],
+        // Etappe 6: Zahlungsabgleich + Kündigungs-Wächter + Zeitvorschläge
+        ["payment_match", 7],
+        ["contract_watch", 9],
       ]) {
         const recent = db.agent_jobs.some(
           (j) => j.org_id === org.id && j.job_type === jobType &&
@@ -1866,6 +2100,76 @@ export function createMailHub({ db, persist }) {
     return [200, { ok: true, storagePath: path, signedUrl, counts }];
   }
 
+  // Vereinfachter EXTF-Builder für den Mock (die verbindliche, golden-getestete
+  // Fassung liegt in supabase/functions/_shared/datev.ts — hier ohne TS-Import).
+  function mockDatevExtf({ settings, periodStart, periodEnd, created, bookings }) {
+    const money = (v) => v.toFixed(2).replace(".", ",");
+    const beleg = (iso) => { const [, m, d] = iso.split("-"); return `${d}${m}`; };
+    const full = (iso) => iso.replace(/-/g, "").slice(0, 8);
+    const q = (s) => `"${String(s).replace(/"/g, '""')}"`;
+    const header = [q("EXTF"), 700, 21, q("Buchungsstapel"), 9, created.replace(/[-:T.Z]/g, "").padEnd(17, "0").slice(0, 17),
+      "", q(""), q("Leitwerk"), q(""), settings.consultantNumber, settings.clientNumber,
+      `${full(periodStart).slice(0, 4)}${String(settings.fiscalYearStartMonth).padStart(2, "0")}01`, 4,
+      full(periodStart), full(periodEnd), q(`Buchungsstapel ${periodStart}-${periodEnd}`), q(""), 1, 0, 0, q("EUR"),
+      "", "", "", "", q(""), q(settings.chartOfAccounts), "", ""].join(";");
+    const cols = ["Umsatz (ohne Soll/Haben-Kz)", "Soll/Haben-Kennzeichen", "WKZ Umsatz", "Kurs", "Basis-Umsatz",
+      "WKZ Basis-Umsatz", "Konto", "Gegenkonto (ohne BU-Schlüssel)", "BU-Schlüssel", "Belegdatum",
+      "Belegfeld 1", "Belegfeld 2", "Skonto", "Buchungstext"].map(q).join(";");
+    const rows = bookings.map((b) => [money(b.amount), q(b.debitCredit), "", "", "", "", b.account, b.contraAccount,
+      b.vatKey ? b.vatKey : "", beleg(b.bookingDate), b.documentRef ? q(b.documentRef) : q(""), q(""), "", q(b.bookingText)].join(";"));
+    return [header, cols, ...rows].join("\r\n") + "\r\n";
+  }
+  function mockDatevTotals(bookings) {
+    let debit = 0, credit = 0;
+    for (const b of bookings) { if (b.debitCredit === "S") debit += b.amount; else credit += b.amount; }
+    return { debit: Math.round(debit * 100) / 100, credit: Math.round(credit * 100) / 100 };
+  }
+
+  // ---------- export-datev (Etappe 6): EXTF-Buchungsstapel, Owner/Admin ----------
+  function handleExportDatev(_req, _url, body, user) {
+    if (!user) return [401, { error: "Nicht angemeldet" }];
+    const orgId = body.orgId;
+    const member = db.org_members.find((m) => m.org_id === orgId && m.user_id === user.id && m.is_active);
+    if (!member || !["owner", "admin"].includes(member.role)) return [403, { error: "Nur Owner/Admin" }];
+    const s = db.accounting_settings.find((a) => a.org_id === orgId) ?? {};
+    const locked = new Set(db.export_items.filter((e) => e.org_id === orgId).map((e) => `${e.source_type}:${e.source_id}`));
+    const bookings = [];
+    const items = [];
+    for (const i of db.invoices_out.filter((x) => x.org_id === orgId &&
+      ["sent", "overdue", "partially_paid", "paid"].includes(x.status) &&
+      x.invoice_date >= body.periodStart && x.invoice_date <= body.periodEnd)) {
+      if (locked.has(`invoice_out:${i.id}`) || !i.gross_amount) continue;
+      bookings.push({ bookingDate: i.invoice_date, amount: Number(i.gross_amount), debitCredit: "S",
+        account: s.acct_receivables ?? "1400", contraAccount: s.acct_revenue_19 ?? "8400",
+        documentRef: i.invoice_number, bookingText: `Ausgangsrechnung ${i.invoice_number}` });
+      items.push({ source_type: "invoice_out", source_id: i.id, booking_date: i.invoice_date, amount: i.gross_amount,
+        debit_account: s.acct_receivables ?? "1400", credit_account: s.acct_revenue_19 ?? "8400",
+        document_ref: i.invoice_number, booking_text: `Ausgangsrechnung ${i.invoice_number}` });
+    }
+    if (bookings.length === 0) return [422, { error: "Keine neuen Belege in dieser Periode." }];
+    const created = now();
+    const content = mockDatevExtf({
+      settings: { consultantNumber: s.consultant_number ?? 0, clientNumber: s.client_number ?? 0,
+        fiscalYearStartMonth: s.fiscal_year_start ?? 1, chartOfAccounts: s.chart_of_accounts ?? "SKR03" },
+      periodStart: body.periodStart, periodEnd: body.periodEnd, created, bookings,
+    });
+    const totals = mockDatevTotals(bookings);
+    const batch = { id: randomUUID(), org_id: orgId, kind: "datev_extf", period_start: body.periodStart,
+      period_end: body.periodEnd, status: "generated", item_count: bookings.length,
+      total_debit: totals.debit, total_credit: totals.credit, generated_by: user.id, generated_at: created,
+      note: null, file_storage_path: null, created_at: now() };
+    db.export_batches.push(batch);
+    for (const it of items) db.export_items.push({ ...it, id: randomUUID(), batch_id: batch.id, org_id: orgId, created_at: now() });
+    const path = `org/${orgId}/datev/EXTF_${body.periodStart}_${body.periodEnd}.csv`;
+    db.mock_storage = db.mock_storage ?? {};
+    db.mock_storage[path] = Buffer.from(content, "latin1").toString("base64");
+    batch.file_storage_path = path;
+    persist();
+    return [200, { ok: true, batchId: batch.id, storagePath: path,
+      signedUrl: `http://127.0.0.1:54321/storage/v1/object/exports/${path}`,
+      itemCount: bookings.length, totalDebit: totals.debit, totalCredit: totals.credit }];
+  }
+
   return {
     handleGmailApi,
     handleOauthGmail,
@@ -1873,9 +2177,11 @@ export function createMailHub({ db, persist }) {
     handleSendMail,
     handleExportXrechnung,
     handleExportOrg,
+    handleExportDatev,
     handleCalendarSync,
     onThreadCommentInserted,
     onCalendarEventInserted,
+    onPaymentMatchWrite,
     buildContext,
     applyJobResult,
     rpc,

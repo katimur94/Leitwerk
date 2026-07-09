@@ -317,6 +317,69 @@ function answerFor(prompt) {
     };
   }
 
+  // payment_match (Etappe 6) — erster Umsatz auf erste betragsgleiche Rechnung
+  if (prompt.includes("ordnest Bank-Umsätze")) {
+    const tx = [...prompt.matchAll(/^- \[([0-9a-f-]{36})\] (-?[\d.]+) € am \S+ \| (.*?) \| (.*)$/gm)];
+    const out = [...prompt.matchAll(/^- \[([0-9a-f-]{36})\] (\S+): ([\d.]+) € \((.*)\)$/gm)];
+    const matches = [];
+    for (const [, txId, amtStr] of tx) {
+      const amt = Number(amtStr);
+      const inv = out.find((o) => Math.abs(Number(o[3]) - Math.abs(amt)) < 0.005);
+      if (inv) matches.push({ transaction_id: txId, invoice_out_id: inv[1], invoice_in_id: null, matched_amount: Math.abs(amt), confidence: 0.95 });
+    }
+    return { matches };
+  }
+
+  // account_assign (Etappe 6)
+  if (prompt.includes("schlägst ein Aufwandskonto")) {
+    return { account: "4930", label: "Bürobedarf", confidence: 0.82 };
+  }
+
+  // time_suggest (Etappe 6)
+  if (prompt.includes("schlägst Zeiterfassungs-Einträge")) {
+    const sigs = [...prompt.matchAll(/^- Termin(?: \[([0-9a-f-]{36})\])?: (.*?)(?: \(~(\d+) min\))?$/gm)];
+    return {
+      entries: sigs.slice(0, 5).map((m) => ({
+        case_id: m[1] ?? null, work_date: null, minutes: Number(m[3] || 60),
+        description: `Nachbereitung: ${m[2]}`, is_billable: true,
+      })),
+    };
+  }
+
+  // summarize_call (Etappe 6)
+  if (prompt.includes("fasst ein Telefonat")) {
+    return {
+      summary: "Kunde bittet um ein Angebot und einen Rückruf diese Woche. (Mock)",
+      outcome: "angebot_gewuenscht",
+      follow_up_title: "Angebot erstellen und zurückrufen",
+    };
+  }
+
+  // extract_contract (Etappe 6)
+  if (prompt.includes("extrahierst die Eckdaten eines Vertrags")) {
+    return {
+      title: "Leasing Transporter", category: "leasing", amount: 349, billing_cycle: "monthly",
+      notice_period_months: 3, notice_deadline: null, ends_on: null, confidence: 0.85,
+    };
+  }
+
+  // contract_watch (Etappe 6)
+  if (prompt.includes("warnst vor auslaufenden Kündigungsfristen")) {
+    const rows = [...prompt.matchAll(/^- \[([0-9a-f-]{36})\] "(.*?)" — Kündigungsfrist bis (\S+) \(in (\d+) Tagen\)/gm)];
+    return {
+      findings: rows.map(([, id, title, deadline, days]) => {
+        const d = Number(days);
+        const tier = d <= 30 ? 30 : d <= 60 ? 60 : 90;
+        return {
+          contract_id: id, severity: tier === 30 ? 1 : tier === 60 ? 2 : 3,
+          title: `Kündigungsfrist läuft: ${title}`,
+          description: `Spätester Kündigungstermin ${deadline} (in ${days} Tagen). (Mock)`,
+          dedupe_key: `contract:${id}:${tier}`,
+        };
+      }),
+    };
+  }
+
   // thread_summary
   if (prompt.includes("Fasse den folgenden E-Mail-Thread")) {
     return {

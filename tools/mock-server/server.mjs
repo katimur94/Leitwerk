@@ -76,6 +76,20 @@ const emptyDb = () => ({
   thread_comments: [],
   calendar_accounts: [],
   calendar_events: [],
+  // Etappe 6: Komplett-Büro
+  time_entries: [],
+  work_profiles: [],
+  absences: [],
+  leave_balances: [],
+  holidays: [],
+  bank_connections: [],
+  bank_transactions: [],
+  payment_matches: [],
+  accounting_settings: [],
+  export_batches: [],
+  export_items: [],
+  call_logs: [],
+  contracts: [],
 });
 
 // Rate-Limit auf /pair (Migration 017) — Fenster pro Minute, im Speicher.
@@ -315,6 +329,27 @@ const tableDefaults = {
   }),
   thread_comments: () => ({
     id: randomUUID(), author_id: null, mentions: [], created_at: now(),
+  }),
+  time_entries: () => ({
+    id: randomUUID(), case_id: null, task_id: null, work_date: now().slice(0, 10),
+    started_at: null, ended_at: null, description: null, is_billable: false,
+    hourly_rate: null, invoice_id: null, source: "manual", locked_at: null,
+    created_at: now(), updated_at: now(),
+  }),
+  absences: () => ({
+    id: randomUUID(), status: "requested", half_day_start: false, half_day_end: false,
+    days_counted: null, note: null, decided_by: null, decided_at: null,
+    sick_note_document_id: null, created_at: now(), updated_at: now(),
+  }),
+  call_logs: () => ({
+    id: randomUUID(), user_id: null, contact_id: null, company_id: null, case_id: null,
+    direction: "outbound", phone_number: null, occurred_at: now(), duration_sec: null,
+    summary: null, transcript: null, audio_storage_path: null, outcome: null,
+    follow_up_task_id: null, source: "manual", job_id: null, created_at: now(), updated_at: now(),
+  }),
+  payment_matches: () => ({
+    id: randomUUID(), invoice_out_id: null, invoice_in_id: null, confidence: null,
+    matched_by: "ai", status: "suggested", job_id: null, confirmed_by: null, created_at: now(),
   }),
   calendar_events: () => ({
     id: randomUUID(), provider_event_id: null, case_id: null,
@@ -638,6 +673,12 @@ function applySelect(table, rows, url) {
           ? { key: automation.key, name: automation.name, hold_minutes: automation.hold_minutes }
           : null,
       };
+    });
+  }
+  if (table === "payment_matches" && select.includes("invoices_out")) {
+    return rows.map((row) => {
+      const inv = db.invoices_out.find((i) => i.id === row.invoice_out_id);
+      return { ...row, invoices_out: inv ? { invoice_number: inv.invoice_number } : null };
     });
   }
   if (table === "automations" && select.includes("trust_stats")) {
@@ -1117,6 +1158,8 @@ const server = http.createServer(async (req, res) => {
       }
     } else if (url.pathname.startsWith("/functions/v1/export-org")) {
       [status, payload] = mailHub.handleExportOrg(req, url, body, userFromAuthHeader(req));
+    } else if (url.pathname.startsWith("/functions/v1/export-datev")) {
+      [status, payload] = mailHub.handleExportDatev(req, url, body, userFromAuthHeader(req));
     } else if (url.pathname.startsWith("/gmail/v1/users/me")) {
       [status, payload] = mailHub.handleGmailApi(req, url);
     } else if (url.pathname.startsWith("/storage/v1/object/")) {
@@ -1161,6 +1204,8 @@ setInterval(() => mailHub.enqueueSyncJobs(), 30_000);
 // Etappe 5: Insert-Trigger für neue Tabellen (Kommentare/@Mentions, Kalender)
 insertTriggers.thread_comments = (row) => mailHub.onThreadCommentInserted(row);
 insertTriggers.calendar_events = (row) => mailHub.onCalendarEventInserted(row);
+// Etappe 6: bestätigter Zahlungs-Match verbucht die Rechnung (writeTrigger)
+writeTriggers.payment_matches = (row) => mailHub.onPaymentMatchWrite(row);
 
 server.listen(PORT, () => {
   console.log(`[mock] Leitwerk-Mock-Backend läuft auf http://127.0.0.1:${PORT}`);

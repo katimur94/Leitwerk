@@ -756,7 +756,64 @@ try {
     { at: 'span:text-is("Wochenreport")', label: "Freitags: KI-Wochenrückblick (briefings kind='weekly')" },
   ]);
 
-  // ---- 44 Regel-Builder (Etappe 0.5) ----
+  // ---- 44 Büro: Zeiterfassung (Etappe 6) ----
+  await page.goto(`${BASE}/buero`);
+  await page.waitForSelector('h3:has-text("Zeit erfassen")');
+  await page.fill("#time-desc", "Ortstermin Baustelle Meier vorbereitet");
+  await page.fill("#time-minutes", "90");
+  await page.click('button:has-text("Erfassen")');
+  await sleep(800);
+  await capture("buero-zeiten", [
+    { at: 'h3:has-text("Zeit erfassen")', label: "Zeit manuell erfassen — oder time_suggest schlägt vor" },
+    { at: 'p:has-text("Diese Woche")', label: "Abrechenbare Zeiten fließen per bill_time_entries in Rechnungen", side: "left" },
+  ]);
+
+  // ---- 45 Büro: Bank-Zahlungsabgleich (Etappe 6) ----
+  await page.click('button:has-text("Bank")');
+  await waitFor(async () => {
+    await sleep(1500);
+    return (await page.locator('button:has-text("Zuordnen")').count()) > 0;
+  }, 120_000, "Zahlungsvorschlag (payment_match)");
+  await capture("buero-bank", [
+    { at: 'span:has-text("Vorschlag")', label: "payment_match ordnet Umsatz einer offenen Rechnung zu (violett = KI)" },
+    { at: 'button:has-text("Zuordnen")', label: "Bestätigen setzt Rechnung auf bezahlt + stoppt Mahnung", side: "left" },
+  ]);
+  await page.click('button:has-text("Zuordnen")');
+  await sleep(1000);
+
+  // ---- 46 Büro: DATEV-Export (Etappe 6) ----
+  await page.click('button:has-text("DATEV")');
+  await page.waitForSelector('h3:has-text("DATEV-Export erzeugen")');
+  await page.fill("#datev-start", "2020-01-01"); // Periode weit fassen (Demo-Rechnung liegt Wochen zurück)
+  await page.click('button:has-text("EXTF erzeugen")');
+  await waitFor(async () => (await page.locator(':text("Buchungsstapel bereit")').count()) > 0, 20_000, "DATEV-Export");
+  await capture("buero-datev", [
+    { at: 'h3:has-text("DATEV-Export erzeugen")', label: "EXTF-Buchungsstapel (Format 700) für den Steuerberater" },
+    { at: 'p:has-text("Steuerberater")', label: "Kontenrahmen bleibt in Hoheit des Beraters" },
+    { at: 'li:has-text("EXTF")', label: "Exportierte Belege werden gesperrt (kein Doppel-Export)", side: "left" },
+  ]);
+
+  // ---- 47 Büro: Verträge + Kündigungswächter (Etappe 6) ----
+  await page.click('button:has-text("Verträge")');
+  await page.waitForSelector('span:has-text("Kündigung bis")');
+  await capture("buero-vertraege", [
+    { at: 'p:has-text("Leasing")', label: "extract_contract liest Eckdaten aus dem PDF (violett = KI)" },
+    { at: 'span:has-text("Kündigung bis")', label: "contract_watch warnt vor der Kündigungsfrist (90/60/30 Tage)", side: "left" },
+  ]);
+
+  // ---- 48 Büro: Anrufnotiz (Etappe 6) ----
+  await page.click('button:has-text("Anrufe")');
+  await page.waitForSelector('h3:has-text("Anruf notieren")');
+  await page.fill("#call-phone", "+49 170 5551234");
+  await page.fill("#call-summary", "Rückruf Anna Meier — Termin bestätigt");
+  await page.click('button:has-text("Notieren")');
+  await sleep(800);
+  await capture("buero-anrufe", [
+    { at: 'h3:has-text("Anruf notieren")', label: "Anrufe schnell festhalten" },
+    { at: "#call-summary", label: "Sprachnotizen transkribiert der Runner lokal (transcribe_call → summarize_call)", side: "left" },
+  ]);
+
+  // ---- 49 Regel-Builder (Etappe 0.5) ----
   await page.goto(`${BASE}/einstellungen/regeln`);
   await page.waitForSelector('h3:has-text("Neue Regel")');
   await page.fill("#rule-name", "Rechnungen sofort melden");
@@ -777,7 +834,7 @@ try {
     { at: 'li:has-text("Rechnungen sofort melden")', label: "Regel aktiv — pausieren oder löschen jederzeit" },
   ]);
 
-  // ---- 46 Dark Mode ----
+  // ---- 51 Dark Mode ----
   await page.click('nav button[title="Design wechseln"]');
   await sleep(400);
   await capture("dark-mode", [
