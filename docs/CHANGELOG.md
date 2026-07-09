@@ -1,5 +1,62 @@
 # Changelog
 
+## Etappe 6 — Büro-Komplett (2026-07-09)
+
+Kompletter Phase-6-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `023_p6_office.sql`):
+
+- **Zeiterfassung:** `time_entries` (manuell + `ai_suggested`), Wochensumme, Sperren nach
+  Abrechnung. Skill **`time_suggest`** schlägt aus Vorgängen/Mails Zeiteinträge vor
+  (Bestätigung durch Nutzer). RPC **`bill_time_entries`** überträgt abrechenbare Einträge
+  als Positionen in eine Rechnung (`hourly_rate` → `invoice_items`) und sperrt sie
+  (`locked_at`) — keine Doppelabrechnung.
+- **Banking & Zahlungsabgleich:** `bank_connections`/`bank_transactions` (CSV/FinTS-fähig).
+  Skill **`payment_match`** ordnet Umsätze offenen Ausgangsrechnungen zu
+  (`payment_matches`, `status='suggested'`); Bestätigen setzt die Rechnung auf `paid`
+  und **stoppt laufende Mahnungen**. `process_overdue_invoices` überspringt Rechnungen
+  mit bestätigtem Match.
+- **DATEV-Export:** Deno-freier Builder `supabase/functions/_shared/datev.ts`
+  (`buildDatevExtf`, EXTF-Buchungsstapel Format 700, CRLF, Komma-Dezimal) — geteilt von
+  Edge Function **`export-datev`** und **Golden-File-Test** (`datev.test.ts`, byte-genau).
+  Exportierte Belege werden über `export_items` gesperrt (kein Doppel-Export); nur
+  Owner/Admin; Datei landet im Bucket `exports`.
+- **Anrufe:** `call_logs` mit schneller Notiz; Sprachnotiz → Skill **`transcribe_call`**
+  (whisper.cpp **lokal**) → Folgejob **`summarize_call`** (KI-Zusammenfassung + Folge-
+  Aufgabe + Case-Event).
+- **Verträge:** `contracts` mit KI-Erfassung (Skill **`extract_contract`** liest Eckdaten
+  aus dem PDF-Text) und Kündigungswächter (Skill **`contract_watch`**, täglich) —
+  `case_findings` kind='risk' bei 90/60/30 Tagen vor Frist (Dedupe pro Stufe).
+- **Abwesenheiten:** `absences` (Urlaub/Krankheit) mit Antrag + Owner/Admin-Genehmigung.
+- **Serverlogik:** `apply_job_result_p6` als **zusätzlicher** Trigger (lässt v4/v5
+  unangetastet): `time_suggest`, `payment_match`, `account_assign`, `transcribe_call`,
+  `summarize_call`, `extract_contract`, `contract_watch`.
+- **PWA:** Modul **Büro** (`/buero`) mit Tabs Zeiten, Bank, DATEV, Verträge, Anrufe,
+  Abwesenheiten — je mit Empty-/Loading-/Fehler-State.
+- **Mock + E2E:** Mock spiegelt alle 023-RPCs/Trigger (bill_time_entries, payment_match,
+  apply_job_result_p6, export-datev mit Inline-EXTF), seedet Konto + Umsatz zur offenen
+  Rechnung und einen Vertrag mit naher Kündigungsfrist. E2E auf **51 Screenshots**
+  erweitert (Zeiterfassung, Zahlungsabgleich, DATEV-Export, Kündigungswächter, Anrufnotiz).
+
+### Manuelle Schritte für den Betreiber (Deploy Etappe 6)
+
+1. **Migration einspielen:** `supabase db push` (neu: `023_p6_office.sql`).
+2. **Edge Function deployen:** `supabase functions deploy export-datev build-job-context`.
+3. **DATEV-Stammdaten hinterlegen** (pro Org in `accounting_settings`): Berater-/Mandanten-
+   nummer, Kontenrahmen (SKR03/04), Wirtschaftsjahr-Beginn, Erlös-/Debitoren-/Kreditoren-
+   konten. Vom **Steuerberater bestätigen lassen** (Kontenrahmen bleibt in dessen Hoheit).
+4. **pg_cron-Jobs anlegen** (SQL-Editor):
+   ```sql
+   select cron.schedule('contract-watch', '0 6 * * *', $$select public.enqueue_org_jobs('contract_watch', 9)$$);
+   select cron.schedule('payment-match',  '0 7 * * *', $$select public.enqueue_org_jobs('payment_match', 7)$$);
+   -- time_suggest optional pro Nutzer/Woche, z. B.:
+   -- select cron.schedule('time-suggest', '0 17 * * 5', $$select public.enqueue_org_jobs('time_suggest', 9)$$);
+   ```
+5. **Banking-Import einrichten:** CSV-Upload oder FinTS/HBCI-Anbindung pro `bank_connection`
+   (Betreiber; keine Zugangsdaten im Client — Tokens im Vault). Siehe `tutorials/`.
+6. **PWA neu bauen/deployen:** `pnpm --filter @leitwerk/pwa build`.
+7. **Runner aktualisieren** (alle Nutzer): `npm update -g leitwerk-runner`
+   (neue Skills `time_suggest`, `payment_match`, `account_assign`, `transcribe_call`,
+   `summarize_call`, `extract_contract`, `contract_watch`).
+
 ## Etappe 5 — Team & Ausbau (2026-07-08)
 
 Kompletter Phase-5-Umfang aus `docs/ROADMAP_PROMPTS.md` (Migration `022_p5_team_calendar.sql`):

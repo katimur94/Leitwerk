@@ -1,6 +1,6 @@
-# Leitwerk — Test-Tutorial (lokal, ohne Supabase) · Phasen 0–5
+# Leitwerk — Test-Tutorial (lokal, ohne Supabase) · Phasen 0–6
 
-Dieses Tutorial zeigt **jedes Feature der Phasen 0 bis 5** mit annotierten Screenshots — aufgenommen
+Dieses Tutorial zeigt **jedes Feature der Phasen 0 bis 6** mit annotierten Screenshots — aufgenommen
 gegen die **lokale Mock-Umgebung**, die komplett ohne Supabase/Docker läuft. Alle
 Screenshots stammen aus einem automatisierten Ende-zu-Ende-Lauf
 (`tools/e2e-tutorial/run.mjs`) und lassen sich jederzeit reproduzieren.
@@ -486,9 +486,55 @@ Viewer und Nicht-Mitglieder werden serverseitig abgelehnt.
 Aufgaben, versendete/bezahlte Rechnungen, Angebots-Pipeline, KI-Trefferquote) →
 `briefings` kind='weekly'. „Heute“ zeigt den Rückblick als eigene Karte (violett = KI).
 
-## 44 · Regel-Builder (Einstellungen → Regeln)
+## 44 · Büro: Zeiterfassung (Etappe 6)
 
-![Regel-Builder](img/44-regel-builder.png)
+![Zeiterfassung](img/44-buero-zeiten.png)
+
+Das Büro-Modul (`/buero`) bündelt den Papierkram. **(1)** Zeiten lassen sich manuell
+erfassen — oder der Runner schlägt sie per `time_suggest` aus Vorgängen/Mails vor
+(violett = KI, Bestätigung durch den Nutzer). **(2)** Abrechenbare Zeiten fließen per
+RPC `bill_time_entries` als Positionen (Snapshot `hourly_rate`) in eine Rechnung und
+werden danach gesperrt — keine Doppelabrechnung.
+
+## 45 · Büro: Zahlungsabgleich (payment_match)
+
+![Zahlungsabgleich](img/45-buero-bank.png)
+
+**(1)** `payment_match` ordnet Bankumsätze offenen Ausgangsrechnungen zu (violett = KI,
+`payment_matches` status='suggested'). **(2)** Bestätigen setzt die Rechnung auf `paid`
+und **stoppt laufende Mahnungen** (`process_overdue_invoices` überspringt Rechnungen mit
+bestätigtem Match). Tokens des Bank-Zugangs bleiben im Vault, nie im Client.
+
+## 46 · Büro: DATEV-EXTF-Export
+
+![DATEV-Export](img/46-buero-datev.png)
+
+**(1)** Der Buchungsstapel (EXTF Format 700) geht an den Steuerberater — erzeugt vom
+Deno-freien Builder `datev.ts`, byte-genau abgesichert durch einen **Golden-File-Test**.
+**(2)** Der Kontenrahmen (SKR03/04) bleibt in der Hoheit des Beraters. **(3)** Bereits
+exportierte Belege werden über `export_items` gesperrt (kein Doppel-Export); nur
+Owner/Admin, Datei im Bucket `exports`.
+
+## 47 · Büro: Verträge & Kündigungs-Wächter
+
+![Verträge](img/47-buero-vertraege.png)
+
+**(1)** `extract_contract` liest Eckdaten (Laufzeit, Kündigungsfrist, Kosten) aus dem
+Vertrags-PDF (violett = KI). **(2)** Der tägliche Wächter `contract_watch` warnt vor der
+Kündigungsfrist in Stufen (90/60/30 Tage) über `case_findings` kind='risk' (Dedupe pro
+Stufe) — nichts läuft mehr unbemerkt aus.
+
+## 48 · Büro: Anrufnotiz
+
+![Anrufe](img/48-buero-anrufe.png)
+
+**(1)** Anrufe schnell festhalten (`call_logs`). **(2)** Sprachnotizen transkribiert der
+Runner **lokal** (`transcribe_call`, whisper.cpp) und fasst sie per Folgejob
+`summarize_call` zusammen — inklusive Folge-Aufgabe und Case-Event am Vorgang.
+
+## 49 · Regel-Builder (Einstellungen → Regeln)
+
+![Regel-Builder](img/49-regel-builder.png)
 
 Die Regel-Engine light (Etappe 0.5): **(1)** Jede Regel folgt dem Muster „Wenn
 *Ereignis* und *Bedingungen*, dann *Aktion*“. **(2)** Ereignisse wie `mail_received`,
@@ -497,17 +543,17 @@ Modulen ausgelöst. **(3)** Bedingungen prüfen Felder der Entity (UND-verknüpf
 von „ist gleich“ bis „fehlt“). **(4)** Ausgewertet wird serverseitig durch die
 Postgres-Funktion `evaluate_org_rules` — Aktionen: Benachrichtigung, Aufgabe oder KI-Job.
 
-## 45 · Regel aktiv
+## 50 · Regel aktiv
 
-![Regel-Liste](img/45-regel-liste.png)
+![Regel-Liste](img/50-regel-liste.png)
 
 **(1)** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede Ausführung
 landet im Audit-Log (`rule.executed`). Seit Etappe 1 feuern `mail_received` und
 `mail_sent` bei jeder synchronisierten bzw. gesendeten Nachricht durch die Engine.
 
-## 46 · Dark Mode
+## 51 · Dark Mode
 
-![Dark Mode](img/46-dark-mode.png)
+![Dark Mode](img/51-dark-mode.png)
 
 **(1)** Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um
 (alle Design-Tokens aus `DESIGN.md`, inklusive angepasster Marken- und KI-Farben).
@@ -515,7 +561,7 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ---
 
-## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1, 2, 3, 4 und 5)
+## Was hier Ende-zu-Ende bewiesen ist (DoD P0 + Etappen 0.5, 1, 2, 3, 4, 5 und 6)
 
 1. Registrierung → Org-Anlage → Onboarding-Wizard mit Stammdaten aus `org_profile` ✓
 2. Runner-Pairing über Pairing-Code + Token-Hash, gehärtet mit Rate-Limit,
@@ -540,7 +586,16 @@ Die Wahl wird gespeichert; ohne Wahl gilt die Systemeinstellung.
    Notizen + Sprachnotizen (Whisper lokal), `knowledge_distill` mit Review,
    Meetings (`transcribe_meeting` lokal → `summarize_meeting`), kombinierte Suche
    (`search_combined`: Volltext + `pgvector`, Query-Embedding lokal im Runner) ✓
-10. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
+10. **Etappe 5:** Thread-Zuweisung + interne Kommentare mit @Mentions (`assign_thread`,
+    `thread_comments`), Kalender-Sync mit automatischem KI-Kontext-Briefing
+    (`calendar_briefing`), Fristenkalender, Wochenreport (`weekly_report`),
+    Org-Datenexport als JSON (kein Lock-in) ✓
+11. **Etappe 6:** Zeiterfassung + `time_suggest` + `bill_time_entries` in Rechnungen,
+    Bankumsatz-Abgleich (`payment_match` → Rechnung bezahlt + Mahnung gestoppt),
+    **DATEV-EXTF-Export** (Golden-File-getestet), Vertragsregister mit Kündigungs-Wächter
+    (`extract_contract`/`contract_watch`), Anrufnotizen (`transcribe_call` lokal →
+    `summarize_call`), Abwesenheiten mit Genehmigung ✓
+12. Alle Views mit Loading-, Empty-, Fehler- und Offline-Zuständen ✓
 
 Gegen echtes Supabase ist der Ablauf identisch — nur dass `supabase start` die
 Datenbank stellt, die Edge Functions in Deno laufen und Updates per Realtime statt

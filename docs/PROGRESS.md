@@ -10,14 +10,17 @@
 | Etappe 2 — Aufgaben-Compiler, Wächter, Briefing | ✅ abgeschlossen (2026-07-08) | Migration 019; E2E grün |
 | Etappe 3 — Finanzen | ✅ abgeschlossen (2026-07-08) | Migration 020; XRechnung-Golden-File; E2E grün |
 | Etappe 4 — Autonomie & Wissen | ✅ abgeschlossen (2026-07-08) | Migration 021; Autonomie-Gate + Halte-Zone serverseitig; E2E grün |
-| **Etappe 5 — Team & Ausbau** | ✅ abgeschlossen (2026-07-08) | Migration 022; geteilte Postfächer, Kalender-Briefing, Wochenreport, Export; E2E 46 Screenshots grün |
-| Etappe 6 — Komplett-Büro | ⬜ offen | |
+| Etappe 5 — Team & Ausbau | ✅ abgeschlossen (2026-07-08) | Migration 022; geteilte Postfächer, Kalender-Briefing, Wochenreport, Export; E2E 46 Screenshots grün |
+| **Etappe 6 — Komplett-Büro** | ✅ abgeschlossen (2026-07-09) | Migration 023; Zeiterfassung, payment_match, DATEV-EXTF (Golden-File), Verträge/Wächter, Anrufe, Abwesenheiten; E2E 51 Screenshots grün |
+
+**Alle Etappen (0.5 – 6) sind im Code abgeschlossen.** Es folgt nur noch der manuelle
+Deploy auf das echte Supabase-Projekt (siehe unten + CHANGELOG).
 
 ## Wartet auf manuellen Deploy (Betreiber)
 
-Die Etappen 0.5, 1, 2, 3, 4 und 5 sind im Code fertig, aber auf dem echten Supabase-Projekt
-noch NICHT eingespielt. Bitte in dieser Reihenfolge ausführen (Details im CHANGELOG
-unter „Manuelle Schritte“ der jeweiligen Etappe):
+Alle Etappen (0.5, 1, 2, 3, 4, 5 und 6) sind im Code fertig, aber auf dem echten
+Supabase-Projekt noch NICHT eingespielt. Bitte in dieser Reihenfolge ausführen (Details
+im CHANGELOG unter „Manuelle Schritte“ der jeweiligen Etappe):
 
 ```bash
 # Etappe 0.5
@@ -50,27 +53,22 @@ supabase functions deploy export-xrechnung
 supabase functions deploy calendar-sync export-org
 # 12. Cron: weekly-report (freitags) + calendar-sync je calendar_account (SQL im CHANGELOG)
 
+# Etappe 6 (zusätzlich)
+# 13. accounting_settings pro Org füllen (Berater-/Mandantennummer, SKR, Konten) —
+#     vom Steuerberater bestätigen lassen; Banking-Import (CSV/FinTS) je bank_connection
+supabase functions deploy export-datev
+# 14. Cron: contract-watch (täglich), payment-match (täglich), time-suggest (optional)
+
 pnpm --filter @leitwerk/pwa build             # PWA deployen
 ```
 
-Etappe 6 kann lokal gegen den Mock-Server weitergebaut werden — der Mock bildet
-die Migrationen 017–022 bereits ab (Demo-Postfach, Mini-Gmail-API, Trigger, RPCs,
-Watchdog-/Mahn-/Wissens-Cron-Ersatz, XRechnung-Export-Stub, Whisper-/Embed-Mocks,
-Autonomie-Gate + Halte-Zone, Kalender-Seed + Briefing, geteilte Postfächer, Export).
+## Fertig
 
-## Notizen für Etappe 6 (Komplett-Büro)
-
-- Phase-6-Prompt aus ROADMAP_PROMPTS.md (Migrationen 011–015 sind bereits eingespielt):
-  1. Zeiterfassung: Timer + manuelle Erfassung + Wochenansicht, Soll/Ist aus
-     `work_profiles`, abrechenbare Zeiten als Rechnungspositionen (Snapshot `hourly_rate`),
-     Skill `time_suggest` (Automation `auto_time_suggest`).
-  2. Abwesenheiten: Antrag/Genehmigung, Urlaubskonto (`leave_balances`), Team-Kalender,
-     AU-Upload, Feiertags-Import.
-  3. Banking/`payment_match`: Kontoumsätze (Migration 012) ↔ Rechnungen abgleichen,
-     `invoice_paid` auslösen; Skill/Regel für Zahlungszuordnung.
-  4. DATEV-EXTF-Export (Migration 013): **Golden-File-Test Pflicht** (wie XRechnung).
-  5. Anrufprotokolle (Migration 014): `calls` + KI-Zusammenfassung, Vorgangs-Verknüpfung.
-  6. Verträge/Abos (Migration 015): Vertragsregister + Kündigungs-Wächter (Fristen).
-- Schema-Ergänzungen NUR als Migration 023 aufwärts (011–015 existieren bereits).
-- Mock (`mail-hub.mjs`/`server.mjs`, `claude-mock.cjs`) + E2E mitziehen; neue Skills
-  brauchen `schemaDescription`. Golden-File für DATEV-EXTF in `packages/shared`.
+Alle Etappen aus `docs/ROADMAP_PROMPTS.md` (0.5 → 6) sind implementiert, getestet
+(`pnpm lint && pnpm test && pnpm build` grün, Golden-File-Tests für XRechnung **und**
+DATEV-EXTF) und im E2E-Tutorial (51 annotierte Screenshots) durchgespielt. Der Mock-Server
+bildet die Migrationen 017–023 vollständig ab (Postfach, Gmail-API, Trigger/RPCs,
+Watchdog-/Mahn-/Wissens-/Wochenreport-/Kündigungswächter-Cron-Ersatz, XRechnung- und
+DATEV-Export-Stubs, Whisper-/Embed-Mocks, Autonomie-Gate + Halte-Zone, Kalender-Seed +
+Briefing, geteilte Postfächer, Banking-Seed + payment_match, Vertrags-Seed). Nächster
+Schritt liegt beim Betreiber: der manuelle Deploy oben.

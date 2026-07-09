@@ -49,7 +49,7 @@ Claude-Max-Abo mit (**BYO-KI**: kein zentraler API-Schlüssel, keine KI-Kosten b
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ PWA  (React 18 + Vite + TS strict, Tailwind, TanStack Query) │
-│  Module: Heute · Posteingang · Vorgänge · Aufgaben · Finanzen│
+│  Heute·Posteingang·Vorgänge·Aufgaben·Finanzen·Kalender·Büro │
 └───────────────┬──────────────────────────────────────────────┘
                 │ supabase-js (Auth, Realtime, Storage, RPC)
 ┌───────────────▼──────────────────────────────────────────────┐
@@ -77,7 +77,7 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
 [lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 46 Bildern:
+mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 51 Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
 ### Anmelden & Registrieren
@@ -249,6 +249,22 @@ KI-Kontext-Briefing** vor jedem Termin, dazu Fristenkalender und Datenexport:
 Und freitags fasst der Wochenreport die Woche zusammen (Mails, Aufgaben, Rechnungen,
 Pipeline). Komplett-Export der Org-Daten als JSON — kein Lock-in.
 
+### Büro: Zeit, Bank, DATEV, Verträge & Anrufe (Etappe 6)
+
+Ein Modul für den Papierkram. Zeiten erfassen (oder vom Runner vorschlagen lassen),
+abrechenbare Stunden fließen direkt in Rechnungen:
+
+![Zeiterfassung](docs/testing-tutorial/img/44-buero-zeiten.png)
+
+`payment_match` ordnet Bankumsätze offenen Rechnungen zu — Bestätigen setzt die Rechnung
+auf bezahlt und stoppt laufende Mahnungen:
+
+![Zahlungsabgleich](docs/testing-tutorial/img/45-buero-bank.png)
+
+DATEV-EXTF-Buchungsstapel für den Steuerberater (byte-genau per Golden-File-Test),
+Vertragsregister mit Kündigungs-Wächter (90/60/30 Tage) und Anrufnotizen (Sprachnotiz →
+Whisper lokal) runden das Büro ab.
+
 ### App-Shell, CommandBar & Dark Mode
 
 Icon-Rail (56 px) → Kontext-Sidebar → Hauptfläche, alle Module navigierbar (kein Feature
@@ -261,7 +277,7 @@ sofort, semantisch (`pgvector`) auf Knopfdruck — das Query-Embedding rechnet d
 Vollwertiges dunkles Theme mit einem Klick, alle Design-Tokens aus
 [docs/DESIGN.md](docs/DESIGN.md):
 
-![Dark Mode](docs/testing-tutorial/img/46-dark-mode.png)
+![Dark Mode](docs/testing-tutorial/img/51-dark-mode.png)
 
 ---
 
@@ -279,7 +295,7 @@ Nutzbarem. Fertige Prompts pro Phase: [docs/ROADMAP_PROMPTS.md](docs/ROADMAP_PRO
 | **P3 — Finanzen** | Eingangsrechnungs-Erfassung + Prüf-Workflow, Angebote/Rechnungen inkl. **XRechnung-XML** (EN 16931), Mahnwesen, Nummernkreise | ✅ **fertig** |
 | **P4 — Autonomie & Wissen** | Autonomie-Regler-UI mit Trefferquoten (TrustMeter), serverseitiges Hochstufen-Gate, Stufe-3-Halte-Zone, Notizen, `knowledge_distill`, semantische Suche (pgvector), Meetings (Whisper lokal) | ✅ **fertig** |
 | **P5 — Team & Papierkram** | Geteilte Postfächer, Kommentare/@Zuweisungen, Fristenkalender, IMAP-Fallback, Kalender-Sync, Wochenreport | ✅ **fertig** |
-| **P6 — Komplett-Büro** | Zeiterfassung + Abwesenheiten, Banking-Sync + Zahlungsabgleich, DATEV-Export, Anrufprotokolle, Vertragsregister mit Kündigungs-Wächter | geplant |
+| **P6 — Komplett-Büro** | Zeiterfassung + Abwesenheiten, Banking-Sync + Zahlungsabgleich, **DATEV-EXTF-Export** (Golden-File), Anrufprotokolle, Vertragsregister mit Kündigungs-Wächter | ✅ **fertig** |
 | **P7 — Produktisierung** | Onboarding-Polish, Landing Page, Preismodell („keine KI-Kosten beim Anbieter“), gehosteter Runner als Option, Pen-Test | offen |
 
 Der Job-Typen-Katalog des Runners (14 Skills von `classify_email` bis `weekly_report`)
