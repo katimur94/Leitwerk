@@ -16,7 +16,7 @@ Claude-Max-Abo mit (**BYO-KI**: kein zentraler API-Schlüssel, keine KI-Kosten b
 
 - [Leitprinzipien](#leitprinzipien)
 - [Architektur](#architektur)
-- [Phase 0 im Detail — mit Screenshots](#phase-0-im-detail--mit-screenshots)
+- [Die komplette Funktions-Tour (alle 51 Screenshots)](#die-komplette-funktions-tour-alle-51-screenshots)
 - [Roadmap](#roadmap)
 - [Repo-Struktur](#repo-struktur)
 - [Loslegen: lokale Test-Umgebung (ohne Supabase)](#loslegen-lokale-test-umgebung-ohne-supabase)
@@ -73,209 +73,364 @@ idempotent (`result_hash`), jede KI-Aktion landet im Audit-Log.
 
 ---
 
-## Phase 0 im Detail — mit Screenshots
+## Die komplette Funktions-Tour (alle 51 Screenshots)
 
-Alle Bilder stammen aus einem automatisierten Ende-zu-Ende-Testlauf gegen die
-[lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — reproduzierbar
-mit `node tools/e2e-tutorial/run.mjs`. Die ausführliche Fassung mit allen 51 Bildern:
+Jedes Bild stammt aus **einem einzigen automatisierten Ende-zu-Ende-Lauf**
+(`node tools/e2e-tutorial/run.mjs`) gegen die
+[lokale Mock-Umgebung](#loslegen-lokale-test-umgebung-ohne-supabase) — kein Docker, kein
+Supabase, keine Secrets. Die Annotationen (nummerierte Marker) werden im selben Lauf
+gerendert. Die Schritt-für-Schritt-Fassung mit denselben Bildern:
 **[docs/testing-tutorial/TUTORIAL.md](docs/testing-tutorial/TUTORIAL.md)**.
 
-### Anmelden & Registrieren
+> **Lesehilfe zur Farbe:** In ganz Leitwerk markiert **Violett** ausnahmslos, was von der
+> **KI** stammt (Entwürfe, Vorschläge, Zusammenfassungen). Alles andere hat der Mensch
+> ausgelöst. Diese Regel aus `docs/DESIGN.md` zieht sich durch jeden folgenden Screenshot.
 
-E-Mail/Passwort-Auth über Supabase, Google-Login vorbereitet. Deutsche Fehlermeldungen,
-klare Zustände — nach `docs/DESIGN.md` (Referenzklasse Linear/Superhuman: ruhig, präzise,
-kein Admin-Template).
+---
+
+### 1 · Anmeldung & Registrierung
+
+Der Einstieg läuft über E-Mail/Passwort-Auth (Supabase Auth), Google-Login ist
+vorbereitet. Fehlermeldungen sind deutsch, jede Eingabe hat einen klaren Zustand —
+Referenzklasse Linear/Superhuman: ruhig, präzise, kein Admin-Template.
 
 ![Login](docs/testing-tutorial/img/01-login.png)
 
-### Onboarding-Wizard (5 Schritte)
+Die Registrierung legt nur das Nutzerkonto an — die Organisation entsteht im nächsten
+Schritt. Passwortregeln und Validierung greifen sofort im Client, final prüft Supabase.
 
-Nach der Registrierung führt der Wizard durch die Einrichtung. Die Org-Anlage
-bootstrapped im Hintergrund alles Nötige: Der Ersteller wird Owner, Firmen-Stammdaten,
-vier Nummernkreise und sieben Standard-Automationen (alle auf Stufe 1) entstehen
-automatisch per Datenbank-Trigger.
+![Registrierung](docs/testing-tutorial/img/02-registrierung.png)
+
+### 2 · Onboarding-Wizard (5 Schritte)
+
+**Schritt 1 — Organisation.** Der Name der Firma ist alles, was hier nötig ist. Im
+Hintergrund bootstrapped ein Datenbank-Trigger die komplette Org: Der Ersteller wird
+`owner`, es entstehen Firmen-Stammdaten, vier Nummernkreise und sieben
+Standard-Automationen — alle auf **Autonomie-Stufe 1** (nur Vorschlag). Multi-Tenancy
+ist ab der ersten Sekunde aktiv (jede Zeile trägt `org_id`, RLS überall).
+
+![Organisation anlegen](docs/testing-tutorial/img/03-onboarding-organisation.png)
+
+**Schritt 2 — Stammdaten.** Anschrift, Steuernummer/USt-IdNr., Bankverbindung. Diese
+Daten fließen später unverändert in Angebote, Rechnungen (ZUGFeRD/XRechnung) und
+Signaturen — einmal erfasst, überall korrekt.
 
 ![Stammdaten](docs/testing-tutorial/img/04-onboarding-stammdaten.png)
 
-Die Stammdaten fließen später in Angebote, Rechnungen (ZUGFeRD/XRechnung, Phase 3)
-und Signaturen. Nummernkreise mit Vorschau der nächsten Nummer:
+**Schritt 3 — Postfach (optional).** Gmail lässt sich schon hier verbinden oder später.
+Der Wizard blockiert nicht: Überspringen ist jederzeit möglich, Dogfooding beginnt auch
+ohne Postfach.
 
-![Nummernkreise](docs/testing-tutorial/img/09-onboarding-nummernkreise.png)
+![Postfach im Onboarding](docs/testing-tutorial/img/05-onboarding-postfach.png)
 
-### Runner-Pairing — das Herzstück des BYO-KI-Modells
-
-Der Nutzer startet den Runner auf seinem Rechner (`npx leitwerk-runner init`), der
-Runner zeigt einen 8-stelligen Code, der Nutzer tippt ihn in die PWA. Beim nächsten
-Poll löst der Runner den Code ein und erhält sein Token — der Klartext existiert genau
-einmal in dieser Antwort, in der Datenbank liegt nur der Hash. Das Pairing ist gehärtet:
-Rate-Limit pro IP (10/Minute), Fehlversuchszähler pro Code (5 → Code gesperrt).
+**Schritt 4 — Runner-Pairing (Herzstück des BYO-KI-Modells).** Der Nutzer startet den
+Runner auf seinem Rechner (`npx leitwerk-runner init`), dieser zeigt einen 8-stelligen
+Code, der Nutzer tippt ihn in die PWA. Beim nächsten Poll löst der Runner den Code ein
+und erhält sein Token — der **Klartext existiert genau einmal** in dieser Antwort, in der
+Datenbank liegt nur der Hash. Gehärtet mit Rate-Limit pro IP (10/Minute) und
+Fehlversuchszähler pro Code (5 → Code gesperrt).
 
 ![Runner-Pairing](docs/testing-tutorial/img/06-onboarding-runner-pairing.png)
 
-**Zwei-Stufen-Pairing:** Der frisch gepairte Runner startet als `pending_approval` und
-darf nichts claimen, bis ein Owner/Admin ihn in der PWA bestätigt — ein erratener
-Pairing-Code allein reicht damit nicht mehr für Datenzugriff:
+**Zwei-Stufen-Pairing.** Der frisch gepairte Runner startet als `pending_approval` und
+darf **nichts** claimen, bis ein Owner/Admin ihn in der PWA bestätigt. Ein erratener
+Pairing-Code allein verschafft damit keinen Datenzugriff.
 
 ![Runner-Freigabe](docs/testing-tutorial/img/07-onboarding-runner-freigabe.png)
 
-Nach der Freigabe erscheint der Runner mit Live-Status (grün = Heartbeat < 3 Minuten,
-dieselbe Schwelle nutzt der serverseitige Watchdog):
+Nach der Freigabe erscheint der Runner mit **Live-Status**: grün bedeutet Heartbeat
+jünger als 3 Minuten — dieselbe Schwelle nutzt der serverseitige Watchdog, der tote
+Runner erkennt und Jobs zurückstellt.
 
 ![Runner verbunden](docs/testing-tutorial/img/08-onboarding-runner-verbunden.png)
 
-### Runner-Einstellungen & Test-Job
+**Schritt 5 — Nummernkreise.** Angebote, Auftragsbestätigungen, Rechnungen und
+Gutschriften bekommen je einen Zähler mit Präfix und Vorschau der nächsten Nummer.
+Vergeben werden sie atomar per `next_number()` — keine Lücken, keine Dubletten, auch bei
+parallelen Zugriffen.
+
+![Nummernkreise](docs/testing-tutorial/img/09-onboarding-nummernkreise.png)
+
+**Fertig.** Der Wizard fasst zusammen und übergibt in die App — ab hier ist die Org
+voll arbeitsfähig.
+
+![Onboarding fertig](docs/testing-tutorial/img/10-onboarding-fertig.png)
+
+### 3 · App-Shell & Grundgerüst
+
+„Heute“ ist die Startfläche: Icon-Rail (56 px) → Kontext-Sidebar → Hauptfläche. Von hier
+sind alle Module erreichbar (Posteingang, Vorgänge, Aufgaben, Finanzen, Notizen,
+Meetings, Kalender, Büro). Kein Bereich ohne durchdachten Zustand — hier der ruhige
+Start des Tages.
+
+![App-Shell (Heute)](docs/testing-tutorial/img/11-app-shell-heute.png)
+
+**Empty-States sind Feature, nicht Lückenfüller.** Solange keine Rechnungen existieren,
+erklärt der leere Finanzbereich, was als Nächstes passiert, statt eine leere Tabelle zu
+zeigen — Pflicht laut `docs/DESIGN.md` (jede Ansicht: Empty-, Loading-, Fehler-Zustand).
+
+![Finanzen leer](docs/testing-tutorial/img/12-finanzen-leer.png)
+
+**CommandBar (Strg/Cmd + K).** Die globale Steuerzentrale: springt zu Modulen, öffnet
+Aktionen und ist zugleich der Einstieg in die Suche. Tastatur-first, jederzeit
+verfügbar.
+
+![CommandBar](docs/testing-tutorial/img/13-commandbar.png)
+
+### 4 · Runner-Steuerung & Test-Job
 
 Die Kommandozentrale für den KI-Agenten: verbundene Runner mit Heartbeat und
-Provider-Badge, Pairing weiterer Runner, und der Test-Job, der die komplette Kette
-prüft. Ist kein Runner online, zeigt ein dezentes Banner das an — der Rest der App
-bleibt voll benutzbar.
+Provider-Badge (`claude_cli` / `codex_cli` / `anthropic_api`), Pairing weiterer Runner.
+Ist kein Runner online, weist ein dezentes Banner darauf hin — der Rest der App bleibt
+voll benutzbar.
 
 ![Runner-Einstellungen](docs/testing-tutorial/img/14-runner-einstellungen.png)
 
-**Abo-Schutz pro Runner:** Stunden- und Tageslimit plus optionales Nachtfenster für
-Batch-Jobs — serverseitig erzwungen in `claim_next_job` (nicht nur UI). Interaktive
-Jobs laufen immer, Nacht-Batch (z. B. Wächter-Lauf) nur im konfigurierten Fenster:
+**Abo-Schutz pro Runner.** Stunden- und Tageslimit plus optionales **Nachtfenster** für
+Batch-Jobs — serverseitig erzwungen in `claim_next_job`, nicht nur im UI. Interaktive
+Jobs (Priorität ≤ 2) laufen immer; Nacht-Batch wie der Wächter-Lauf nur im
+konfigurierten Zeitraum. So bleibt das mitgebrachte Claude-Abo im Rahmen.
 
 ![Runner-Limits](docs/testing-tutorial/img/15-runner-limits.png)
 
-Der Test-Job legt einen `echo`-Job in die Queue (Priorität 2 = interaktiv). Der Runner
-claimt ihn per `claim_next_job` (prioritätssortiert, SKIP LOCKED), holt sich den
-serverseitig zugeschnittenen Kontext, ruft die KI und liefert das strikt Zod-geparste
-Ergebnis mit Idempotenz-Hash ab:
+**Test-Job.** Ein Klick legt einen `echo`-Job in die Queue (Priorität 2 = interaktiv).
+Der Runner claimt ihn per `claim_next_job` (prioritätssortiert, `SKIP LOCKED`), holt den
+serverseitig zugeschnittenen Kontext (`build-job-context`), ruft die KI und liefert das
+strikt Zod-geparste Ergebnis mit Idempotenz-Hash ab.
 
 ![Test-Job gesendet](docs/testing-tutorial/img/16-testjob-gesendet.png)
 
-Der Status läuft live durch (Wartet → Läuft → Erledigt), die Antwort trägt das violette
-**KI-Badge** — die eiserne Design-Regel: Violett markiert überall in Leitwerk
-ausschließlich, was von der Maschine kommt.
+Der Status läuft **live** durch (Wartet → Läuft → Erledigt, via Realtime), die Antwort
+trägt das violette KI-Badge. Damit ist die komplette Kette bewiesen:
+PWA → Queue → Runner → KI → Ergebnis zurück in der PWA.
 
 ![KI-Antwort](docs/testing-tutorial/img/17-testjob-ki-antwort.png)
 
-### E-Mail-Hub + Vorgangsakte (Etappe 1)
+### 5 · E-Mail-Hub + Vorgangsakte (Etappe 1)
 
-Gmail verbinden (OAuth, Refresh-Token im Vault) → der Runner synchronisiert (Initial
-90 Tage, Delta alle 2 Minuten) → jede neue Mail wird klassifiziert (`classify_email`)
-und automatisch einem Vorgang zugeordnet oder als neuer Vorgang angelegt
-(`case_match`, Konfidenz-Gate serverseitig):
+**Postfach verbinden** per Google-OAuth — der Refresh-Token wandert sofort in den
+Supabase Vault, nie in den Client oder ins Log.
+
+![Postfach verbinden](docs/testing-tutorial/img/18-postfach-verbinden.png)
+
+Nach dem Consent zeigt die PWA das verbundene Konto samt Sync-Status. Der Runner holt
+initial 90 Tage, danach Delta alle 2 Minuten.
+
+![Postfach verbunden](docs/testing-tutorial/img/19-postfach-verbunden.png)
+
+**Inbox mit KI-Kategorien.** Jede neue Mail wird klassifiziert (`classify_email`) und
+entweder einem bestehenden Vorgang zugeordnet oder als neuer angelegt (`case_match`,
+Konfidenz-Gate serverseitig). Kategorien und Vorgangsbezug sind sofort sichtbar.
 
 ![Inbox](docs/testing-tutorial/img/20-inbox.png)
 
-KI-Antwortentwürfe (`draft_reply`) landen violett markiert im Thread — gesendet wird
-nie ohne Freigabe, und jedes Senden hat ein serverseitig erzwungenes
-30-Sekunden-Rückhol-Fenster:
+**Thread mit Auto-Vorgang.** Öffnet man einen Thread, hängt bereits ein Vorgang daran —
+mit Nummernkreis. Rechts der Kontext, links die Nachrichten.
+
+![Thread mit Vorgang](docs/testing-tutorial/img/21-thread-vorgang.png)
+
+**KI-Antwortentwurf.** `draft_reply` schlägt eine Antwort im gelernten Schreibstil vor
+(violett) — als Entwurf, nie automatisch gesendet.
+
+![KI-Entwurf](docs/testing-tutorial/img/22-ki-entwurf.png)
+
+**Senden mit 30-Sekunden-Rückholen.** Jeder Versand hat ein serverseitig erzwungenes
+Undo-Fenster: In den ersten 30 Sekunden lässt sich die Mail zurückholen, bevor sie
+tatsächlich rausgeht.
 
 ![Senden mit Undo](docs/testing-tutorial/img/23-senden-undo.png)
 
-Die Vorgangsakte bündelt alles mit Timeline (violetter Punkt = KI-Eintrag),
-Nummernkreis und Status-Workflow:
+Danach erscheint die Nachricht als **gesendet** im Thread und in der Vorgangs-Timeline —
+Outbound und Inbound an einem Ort.
 
-![Vorgangsakte](docs/testing-tutorial/img/30-vorgang-detail.png)
+![Gesendet](docs/testing-tutorial/img/24-gesendet.png)
 
-### Aufgaben-Compiler, Nacht-Wächter & Morgen-Briefing (Etappe 2)
+### 6 · Aufgaben, Briefing & Benachrichtigungen (Etappe 2)
 
-`extract_commitments` übersetzt Mails in Aufgaben-Vorschläge (violett, mit
-Feedback-Schleife), der Nacht-Wächter (`gap_scan`) findet Liegengebliebenes, und
-`morning_briefing` startet den Tag mit den wichtigsten Punkten samt direkter Aktion.
-Die Follow-up-Engine fasst automatisch nach, wenn Antworten ausbleiben; Web-Push
-bringt Benachrichtigungen aufs Gerät:
+**Aufgaben-Compiler.** `extract_commitments` übersetzt Zusagen aus Mails in
+Aufgaben-Vorschläge (violett, mit Feedback-Schleife: Annehmen/Verwerfen speist die
+Trefferquote).
+
+![Aufgaben](docs/testing-tutorial/img/25-aufgaben.png)
+
+**Morgen-Briefing + Nacht-Wächter.** `morning_briefing` startet den Tag mit den
+wichtigsten Punkten samt direkter Aktion; der nächtliche `gap_scan` findet
+Liegengebliebenes (z. B. eine seit 3 Tagen unbeantwortete Mail) und meldet es als
+Wächter-Finding.
 
 ![Heute-Briefing](docs/testing-tutorial/img/26-heute-briefing.png)
 
-### Finanzen: E-Rechnung, XRechnung-Export & Mahnwesen (Etappe 3)
+**Notification-Center + Web-Push.** Benachrichtigungen sammeln sich zentral und kommen
+per Web-Push aufs Gerät — auch wenn die PWA gerade nicht offen ist.
 
-Eingangsrechnungen erfasst der Runner direkt aus dem Mail-Anhang: liegt ein
+![Benachrichtigungen](docs/testing-tutorial/img/27-benachrichtigungen.png)
+
+**Automationen mit TrustMeter.** Jede Automation zeigt ihre gemessene Trefferquote —
+die Grundlage dafür, ob sie überhaupt hochgestuft werden darf.
+
+![Automationen mit TrustMeter](docs/testing-tutorial/img/28-automationen.png)
+
+### 7 · Vorgänge — die zentrale Einheit
+
+Die Vorgangsliste bündelt alle Fälle mit Status, Nummernkreis und letzter Aktivität.
+Vorgänge sind das Rückgrat: Mail, Datei, Termin, Rechnung, Notiz und Aufgabe hängen
+daran.
+
+![Vorgänge](docs/testing-tutorial/img/29-vorgaenge.png)
+
+Die **Vorgangsakte** zeigt die komplette Timeline (violetter Punkt = KI-Eintrag),
+verknüpfte Objekte und den Status-Workflow — ein Fall, eine Akte, kein App-Springen.
+
+![Vorgangsakte](docs/testing-tutorial/img/30-vorgang-detail.png)
+
+### 8 · Finanzen: E-Rechnung, XRechnung & Mahnwesen (Etappe 3)
+
+**Eingangsrechnungen** erfasst der Runner direkt aus dem Mail-Anhang: liegt ein
 E-Rechnungs-XML (ZUGFeRD/XRechnung) bei, wird es **deterministisch ohne KI** gelesen —
-sonst extrahiert die KI aus PDF-Text bzw. Mailtext. Danach: Prüf-Workflow
-(erfasst → geprüft → freigegeben → bezahlt) mit Dubletten-Erkennung:
+sonst extrahiert die KI aus PDF- bzw. Mailtext. Danach der Prüf-Workflow
+(erfasst → geprüft → freigegeben → bezahlt) mit Dubletten-Erkennung.
 
 ![Eingangsrechnung](docs/testing-tutorial/img/31-finanzen-eingang.png)
 
-Ausgangsrechnungen und Angebote mit Positionsliste (Summen rechnet die Datenbank,
-Nummern kommen atomar aus `next_number()`) und **XRechnung-3.0-Export** (UBL 2.1,
-EN 16931, Golden-File-getestet; B2G-Leitweg-ID serverseitig erzwungen):
+**Rechnungs-Editor.** Angebote und Ausgangsrechnungen mit Positionsliste — die Summen
+rechnet die Datenbank, die Nummer kommt atomar aus `next_number()`. Der
+**XRechnung-3.0-Export** (UBL 2.1, EN 16931) ist Golden-File-getestet; die B2G-Leitweg-ID
+wird serverseitig erzwungen.
 
 ![Rechnungs-Editor](docs/testing-tutorial/img/32-rechnung-editor.png)
 
-Das Mahnwesen schlägt bei überfälligen Rechnungen bis zu drei Stufen mit KI-Entwurf
-vor — versendet wird ausschließlich nach Freigabe, über denselben geplanten Versand
-mit 30-Sekunden-Rückholen wie jede Mail:
+**Mahnwesen.** Bei überfälligen Rechnungen schlägt der Runner bis zu drei Stufen mit
+KI-Entwurf vor — versendet wird ausschließlich nach Freigabe, über denselben geplanten
+Versand mit 30-Sekunden-Rückholen wie jede Mail.
 
 ![Mahnwesen](docs/testing-tutorial/img/33-mahnwesen.png)
 
-### Regel-Engine light (Einstellungen → Regeln)
+### 9 · Autonomie, Halte-Zone, Wissen & Meetings (Etappe 4)
 
-Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*, dann *Aktion*
-(Benachrichtigung, Aufgabe, KI-Job)“. Die Auswertung läuft serverseitig
-(`evaluate_org_rules`); ab Phase 1 schleusen alle Module ihre Ereignisse
-(`mail_received`, `invoice_captured`, `quote_sent`, `payment_matched`, …) hindurch:
+**Autonomie-Regler (1–4) mit serverseitigem Gate.** Das Hochstufen auf Stufe 3/4 prüft
+der Server (`set_autonomy_level`): erst ab nachgewiesener Trefferquote über genügend
+Läufe — nicht nur im UI. Stufe 1 schlägt vor, Stufe 4 handelt autonom und meldet nur
+Ausnahmen.
 
-![Regeln](docs/testing-tutorial/img/35-regel-liste.png)
+![Autonomie-Regler](docs/testing-tutorial/img/34-automationen-regler.png)
 
-### Autonomie-Regler, Halte-Zone, Wissen & Meetings (Etappe 4)
-
-Jede Automation hat einen Autonomie-Regler (1–4). Das **Hochstufen auf Stufe 3/4
-prüft der Server** (`set_autonomy_level`): erst ab nachgewiesener Trefferquote über
-genügend Läufe — nicht nur im UI:
-
-![Automationen](docs/testing-tutorial/img/34-automationen-regler.png)
-
-Stufe-3-Aktionen laufen durch eine **Halte-Zone**: sichtbar mit Countdown, ein Klick
-stoppt vor dem Versand (violett = KI):
+**Halte-Zone (Stufe 3).** Aktionen mit Außenwirkung laufen sichtbar durch eine Wartezone
+mit Countdown — ein Klick stoppt sie vor dem Versand (`stop_automation_run`, Outcome
+`corrected`). Der violette Banner in der App-Shell macht das jederzeit sichtbar.
 
 ![Halte-Zone](docs/testing-tutorial/img/35-halte-zone.png)
 
-Der Runner destilliert dauerhaftes Firmenwissen aus Mails und Meetings
-(`knowledge_distill`) — Vorschläge werden geprüft, bevor sie ins Gedächtnis wandern:
+**Notizen & Sprachnotizen.** Markdown-Notizen mit Anlage/Bearbeiten/Löschen; Sprachnotiz
+via MediaRecorder → Job `transcribe_note` → **Whisper transkribiert lokal** im Runner
+(keine Cloud).
 
-![Wissen](docs/testing-tutorial/img/37-wissen.png)
+![Notizen](docs/testing-tutorial/img/36-notizen.png)
 
-Meetings: Audio hochladen → **Whisper transkribiert lokal** (keine Cloud) → KI-Protokoll
-mit Entscheidungen und Aufgaben:
+**Institutionelles Wissen.** `knowledge_distill` destilliert dauerhafte Firmenfakten aus
+Mails und Meetings — jeder Vorschlag wird **geprüft** (Bestätigen/Ablehnen), bevor er ins
+Gedächtnis wandert. So altert das Wissen nicht ungefiltert.
+
+![Wissen (Review)](docs/testing-tutorial/img/37-wissen.png)
+
+**Meetings.** Audio hochladen → `transcribe_meeting` (Whisper lokal) → Folgejob
+`summarize_meeting` erzeugt ein KI-Protokoll mit Entscheidungen und Aufgaben, verknüpft
+mit dem passenden Vorgang.
 
 ![Meetings](docs/testing-tutorial/img/38-meetings.png)
 
-### Geteilte Postfächer, Kalender & Wochenreport (Etappe 5)
+### 10 · Kombinierte Suche (Volltext + semantisch)
 
-Threads lassen sich einem Mitglied zuweisen und intern kommentieren (mit @Mentions) —
-ohne Weiterleiten-Chaos:
+Die CommandBar-Suche liefert Volltext (`tsvector`) sofort und semantische Treffer
+(`pgvector`) auf Knopfdruck. Das entscheidende Detail: Das **Query-Embedding rechnet der
+Runner lokal**, nie der Client — Suche über Mails, Vorgänge, Notizen und Wissen aus einem
+Feld.
+
+![Kombinierte Suche](docs/testing-tutorial/img/39-suche.png)
+
+### 11 · Team, Kalender & Wochenreport (Etappe 5)
+
+**Geteiltes Postfach.** Threads lassen sich einem Mitglied zuweisen (`assign_thread`,
+Member-Check serverseitig) und **intern kommentieren mit @Mentions** (`thread_comments` →
+Benachrichtigung kind='mention') — kein Weiterleiten-Chaos.
 
 ![Zuweisung & Kommentar](docs/testing-tutorial/img/40-zuweisung-kommentar.png)
 
-Der Kalender zeigt Termine (Google-Sync über den Runner) mit **automatischem
-KI-Kontext-Briefing** vor jedem Termin, dazu Fristenkalender und Datenexport:
+**Kalender mit KI-Kontext-Briefing.** Termine kommen per Google-Sync über den Runner
+(kurzlebiges Token aus dem Vault). Vor jedem baldigen Termin (≤ 24 h) erzeugt
+`calendar_briefing` automatisch ein Kontext-Briefing aus offenen Vorgängen und letzten
+Mails der Teilnehmer (violett = KI). Darunter der Fristenkalender (wiederkehrende
+Pflichten als Aufgaben).
 
 ![Kalender](docs/testing-tutorial/img/41-kalender.png)
 
-Und freitags fasst der Wochenreport die Woche zusammen (Mails, Aufgaben, Rechnungen,
-Pipeline). Komplett-Export der Org-Daten als JSON — kein Lock-in.
+**Datenexport (kein Lock-in).** Ein Klick erzeugt einen kompletten JSON-Snapshot aller
+org-scoped Tabellen im Bucket `exports` (signierte URL) — nur Owner/Admin. Die Daten
+gehören dem Nutzer, jederzeit vollständig entnehmbar.
 
-### Büro: Zeit, Bank, DATEV, Verträge & Anrufe (Etappe 6)
+![Datenexport](docs/testing-tutorial/img/42-datenexport.png)
 
-Ein Modul für den Papierkram. Zeiten erfassen (oder vom Runner vorschlagen lassen),
-abrechenbare Stunden fließen direkt in Rechnungen:
+**Wochenreport.** Freitags fasst `weekly_report` die Woche zusammen (bearbeitete Mails,
+erledigte Aufgaben, versendete/bezahlte Rechnungen, Angebots-Pipeline, KI-Trefferquote) →
+`briefings` kind='weekly'. „Heute“ zeigt den Rückblick als eigene Karte.
+
+![Wochenreport](docs/testing-tutorial/img/43-wochenreport.png)
+
+### 12 · Büro: Zeit, Bank, DATEV, Verträge & Anrufe (Etappe 6)
+
+**Zeiterfassung.** Zeiten manuell erfassen — oder der Runner schlägt sie per
+`time_suggest` aus Vorgängen/Mails vor (violett, Bestätigung durch den Nutzer).
+Abrechenbare Stunden fließen per RPC `bill_time_entries` als Positionen (Snapshot
+`hourly_rate`) direkt in eine Rechnung und werden danach gesperrt — keine
+Doppelabrechnung.
 
 ![Zeiterfassung](docs/testing-tutorial/img/44-buero-zeiten.png)
 
-`payment_match` ordnet Bankumsätze offenen Rechnungen zu — Bestätigen setzt die Rechnung
-auf bezahlt und stoppt laufende Mahnungen:
+**Zahlungsabgleich.** `payment_match` ordnet Bankumsätze offenen Ausgangsrechnungen zu
+(violett, `payment_matches` status='suggested'). Bestätigen setzt die Rechnung auf `paid`
+und **stoppt laufende Mahnungen** (`process_overdue_invoices` überspringt bestätigte
+Matches). Bank-Zugangsdaten bleiben im Vault, nie im Client.
 
 ![Zahlungsabgleich](docs/testing-tutorial/img/45-buero-bank.png)
 
-DATEV-EXTF-Buchungsstapel für den Steuerberater (byte-genau per Golden-File-Test),
-Vertragsregister mit Kündigungs-Wächter (90/60/30 Tage) und Anrufnotizen (Sprachnotiz →
-Whisper lokal) runden das Büro ab.
+**DATEV-EXTF-Export.** Der Buchungsstapel (EXTF Format 700) geht an den Steuerberater —
+erzeugt vom Deno-freien Builder `datev.ts`, **byte-genau abgesichert durch einen
+Golden-File-Test**. Der Kontenrahmen (SKR03/04) bleibt in dessen Hoheit; bereits
+exportierte Belege werden über `export_items` gesperrt (kein Doppel-Export).
 
-### App-Shell, CommandBar & Dark Mode
+![DATEV-Export](docs/testing-tutorial/img/46-buero-datev.png)
 
-Icon-Rail (56 px) → Kontext-Sidebar → Hauptfläche, alle Module navigierbar (kein Feature
-ohne Empty-State). CommandBar per Strg/Cmd+K ist die globale Suche: Volltext (`tsvector`)
-sofort, semantisch (`pgvector`) auf Knopfdruck — das Query-Embedding rechnet der Runner
-**lokal**, nie der Client:
+**Verträge & Kündigungs-Wächter.** `extract_contract` liest Eckdaten (Laufzeit,
+Kündigungsfrist, Kosten) aus dem Vertrags-PDF (violett). Der tägliche `contract_watch`
+warnt gestaffelt (90/60/30 Tage) über `case_findings` kind='risk' — nichts läuft mehr
+unbemerkt aus.
 
-![Suche](docs/testing-tutorial/img/39-suche.png)
+![Verträge](docs/testing-tutorial/img/47-buero-vertraege.png)
 
-Vollwertiges dunkles Theme mit einem Klick, alle Design-Tokens aus
-[docs/DESIGN.md](docs/DESIGN.md):
+**Anrufnotiz.** Anrufe schnell festhalten; Sprachnotizen transkribiert der Runner
+**lokal** (`transcribe_call`, whisper.cpp) und fasst sie per Folgejob `summarize_call`
+zusammen — inklusive Folge-Aufgabe und Case-Event am Vorgang.
+
+![Anrufe](docs/testing-tutorial/img/48-buero-anrufe.png)
+
+### 13 · Regel-Engine light (Einstellungen → Regeln)
+
+**Regel-Builder.** Wenn-Dann-Regeln pro Organisation: „Wenn *Ereignis* und *Bedingungen*,
+dann *Aktion*“. Ereignisse wie `mail_received`, `invoice_captured`, `quote_sent` oder
+`payment_matched` werden von den Modulen ausgelöst; Bedingungen prüfen Felder der Entity
+(UND-verknüpft). Ausgewertet wird serverseitig durch `evaluate_org_rules`.
+
+![Regel-Builder](docs/testing-tutorial/img/49-regel-builder.png)
+
+**Regel aktiv.** Angelegte Regeln lassen sich jederzeit pausieren oder löschen; jede
+Ausführung landet im Audit-Log (`rule.executed`).
+
+![Regel-Liste](docs/testing-tutorial/img/50-regel-liste.png)
+
+### 14 · Dark Mode
+
+Ein Klick auf den Mond in der Icon-Rail schaltet das vollwertige dunkle Theme um — alle
+Design-Tokens aus `docs/DESIGN.md`, inklusive angepasster Marken- und KI-Farben. Die Wahl
+wird gespeichert; ohne Wahl gilt die Systemeinstellung.
 
 ![Dark Mode](docs/testing-tutorial/img/51-dark-mode.png)
 
