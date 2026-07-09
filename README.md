@@ -10,6 +10,11 @@ Claude-Max-Abo mit (**BYO-KI**: kein zentraler API-Schlüssel, keine KI-Kosten b
 
 ![App-Shell](docs/testing-tutorial/img/11-app-shell-heute.png)
 
+> 📑 **Zum Vorstellen & Vermarkten:** die komplette Funktionsvorstellung als PDF —
+> jede Funktion mit Beispiel-Screenshot und Erklärung:
+> **[docs/Leitwerk-Praesentation.pdf](docs/Leitwerk-Praesentation.pdf)** (68 Seiten, A4 quer).
+> Reproduzierbar mit `node docs/praesentation/build.mjs`.
+
 ---
 
 ## Inhalt
@@ -518,6 +523,7 @@ Nützlich: `pnpm lint` · `pnpm test` · `pnpm build` · `node tools/e2e-tutoria
 - **[ROADMAP_PROMPTS.md](docs/ROADMAP_PROMPTS.md)** — fertige Claude-Code-Prompts für jede Phase
 - **[CHANGELOG.md](docs/CHANGELOG.md)** — was in welcher Phase entstand + manuelle Deploy-Schritte
 - **[Test-Tutorial](docs/testing-tutorial/TUTORIAL.md)** — jedes Feature mit annotiertem Screenshot
+- **[Funktionsvorstellung (PDF)](docs/Leitwerk-Praesentation.pdf)** — 68-seitige Präsentation zum Vorstellen & Vermarkten (Quelle: `docs/praesentation/build.mjs`)
 - **[tutorials/](tutorials/)** — manuelle Betreiber-Schritte (Supabase, OAuth, Deployment, Runner, Banking/DATEV)
 
 ---
